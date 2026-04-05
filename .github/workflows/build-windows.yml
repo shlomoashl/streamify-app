@@ -1,0 +1,40 @@
+name: Build Windows App
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    # 1. מוריד את הקוד לשרת הווינדוס
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2. מתקין Node.js
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    # 3. מתקין את שפת Rust (חובה בשביל לקמפל את Tauri/Windows)
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    # 4. מתקין את כל הספריות של הפרויקט
+    - name: Install dependencies
+      run: npm install
+
+    # 5. מקמפל את אפליקציית הווינדוס!
+    - name: Build Tauri Windows App
+      run: npm run build:windows
+
+    # 6. מעלה את קובץ ההתקנה המוכן כדי שתוכל להוריד אותו
+    - name: Upload Windows App
+      uses: actions/upload-artifact@v4
+      with:
+        name: streamify-windows
+        path: src-tauri/target/release/bundle/
