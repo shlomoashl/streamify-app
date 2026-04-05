@@ -39,16 +39,27 @@ jobs:
     - name: Sync Capacitor
       run: npx cap sync android
 
-    # 7. מקמפל את אפליקציית האנדרואיד ל-APK
-    - name: Build APK
+    # 7. מפענח את קובץ החתימה הסודי שלך (Keystore) מתוך גיטהאב
+    - name: Decode Keystore
+      env:
+        ENCODED_STRING: ${{ secrets.KEYSTORE_BASE64 }}
+      run: |
+        echo $ENCODED_STRING | base64 -d > android/my-release-key.keystore
+
+    # 8. מקמפל את אפליקציית האנדרואיד (Release) וחותם עליה עם הסודות שלך
+    - name: Build and Sign Release APK
       working-directory: ./android
       run: |
         chmod +x gradlew
-        ./gradlew assembleDebug
+        ./gradlew assembleRelease \
+          -Pandroid.injected.signing.storeFile=my-release-key.keystore \
+          -Pandroid.injected.signing.storePassword=${{ secrets.KEYSTORE_PASSWORD }} \
+          -Pandroid.injected.signing.keyAlias=${{ secrets.KEY_ALIAS }} \
+          -Pandroid.injected.signing.keyPassword=${{ secrets.KEY_PASSWORD }}
 
-    # 8. מעלה את קובץ ה-APK המוכן כדי שתוכל להוריד אותו
-    - name: Upload APK
+    # 9. מעלה את קובץ ה-APK המוכן והחתום כדי שתוכל להוריד אותו
+    - name: Upload Release APK
       uses: actions/upload-artifact@v4
       with:
-        name: streamify-app.apk
-        path: android/app/build/outputs/apk/debug/app-debug.apk
+        name: streamify-app-release.apk
+        path: android/app/build/outputs/apk/release/app-release.apk
