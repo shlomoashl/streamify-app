@@ -1,0 +1,5 @@
+{
+  "name": "מוזיקה",
+  "description": "A Spotify-inspired music streaming application with multi-source playback, background audio support, and a sleek dark interface.",
+  "requestFramePermissions": []
+}

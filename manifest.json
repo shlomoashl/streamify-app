@@ -1,0 +1,17 @@
+
+{
+  "short_name": "Streamify",
+  "name": "Streamify Music",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512 192x192"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#121212",
+  "background_color": "#121212",
+  "orientation": "portrait"
+}

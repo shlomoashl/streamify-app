@@ -1,0 +1,54 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: # מאפשר להריץ את הקימפול גם ידנית בלחיצת כפתור
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. מוריד את הקוד שלך לשרת של גיטהאב
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2. מתקין Node.js (בשביל שנוכל להריץ npm install)
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    # 3. מתקין Java (חובה כדי לקמפל אנדרואיד)
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+
+    # 4. מתקין את כל הספריות של הפרויקט שלך
+    - name: Install dependencies
+      run: npm install
+
+    # 5. בונה את אפליקציית ה-Web (הריאקט/Vite שלך)
+    - name: Build Web App
+      run: npm run build
+
+    # 6. מעביר את קבצי האתר לתוך תיקיית האנדרואיד (Capacitor)
+    - name: Sync Capacitor
+      run: npx cap sync android
+
+    # 7. מקמפל את אפליקציית האנדרואיד ל-APK
+    - name: Build APK
+      working-directory: ./android
+      run: |
+        chmod +x gradlew
+        ./gradlew assembleDebug
+
+    # 8. מעלה את קובץ ה-APK המוכן כדי שתוכל להוריד אותו
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: streamify-app.apk
+        path: android/app/build/outputs/apk/debug/app-debug.apk
