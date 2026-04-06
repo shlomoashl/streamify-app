@@ -4,10 +4,10 @@
 // ---------------------------------------------------------------------------
 
 // הכתובת של האתר המאובטח שלך
-export const SERVER_PUBLIC_URL = 'https://www.familydigital.ovh';
-
+const BASE_URL = import.meta.env.VITE_SERVER_URL || 'https://your-fallback-url.com';
+export const SERVER_PUBLIC_URL = BASE_URL;
 // נתיב ל-WebSocket של ספוטיפיי
-export const SPOTIFY_WS_URL = 'wss://www.familydigital.ovh/api/youtube/ws/spotify-playlist-stream';
+export const SPOTIFY_WS_URL = `${BASE_URL.replace('https://', 'wss://')}/api/youtube/ws/spotify-playlist-stream`;
 
 // ---------------------------------------------------------------------------
 // נתיבים ל-API החדש (SQL Based)

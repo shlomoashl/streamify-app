@@ -35,6 +35,8 @@ jobs:
     # 5. מקמפל את אפליקציית הווינדוס!
     - name: Build Tauri Windows App
       run: npm run build:windows
+      env:
+        VITE_SERVER_URL: ${{ secrets.VITE_SERVER_URL }}
 
     # 6. מעלה את קובץ ההתקנה כ-Artifact (לגיבוי רגיל)
     - name: Upload Windows App

@@ -38,6 +38,8 @@ jobs:
     # 5. בונה את אפליקציית ה-Web
     - name: Build Web App
       run: npm run build
+      env:        
+        VITE_SERVER_URL: ${{ secrets.VITE_SERVER_URL }}
 
     # 6. מעביר את קבצי האתר לתוך תיקיית האנדרואיד
     - name: Sync Capacitor
