@@ -54,8 +54,9 @@ const shuffleArray = <T,>(array: T[]): T[] => {
 };
 
 const searchResultToPlaylistItem = (result: YouTubeSearchResult, source: string = 'search'): PlaylistItem => ({
-    id: result.id,
-    title: result.title,
+    // התיקון שלנו: אם אין ID, ניצור מזהה ייחודי מזויף כדי למנוע את באג הצביעה הכפולה
+    id: result.id || `broken-${crypto.randomUUID()}`,
+    title: result.title || 'שיר לא זמין',
     author: result.author || result.channel || '',
     duration: parseDurationToSeconds(result.duration),
     thumbnail: result.thumbnail || result.thumbnail_url || '',
@@ -1028,6 +1029,7 @@ const App: React.FC = () => {
                 const message = JSON.parse(event.data);
                 if (message.type === 'track') {
                     const data = message.data;
+                    if (!data.id) return;
                     const newSong: PlaylistItem = { id: data.id, title: data.title, author: data.author || '', duration: parseDurationToSeconds(data.duration), thumbnail: data.thumbnail_url || '', addedBy: 'spotify_import', addedAt: new Date().toISOString() };
                     setSelectedPlaylist(prev => (!prev || !prev.id.startsWith('temp-')) ? prev : { ...prev, name: 'טעינה מספוטיפיי...', songs: [...prev.songs, newSong] });
                 } else if (message.type === 'end') { ws.close(); setSelectedPlaylist(prev => prev ? { ...prev, name: 'Spotify Imported Playlist' } : null);
