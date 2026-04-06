@@ -54,9 +54,8 @@ const shuffleArray = <T,>(array: T[]): T[] => {
 };
 
 const searchResultToPlaylistItem = (result: YouTubeSearchResult, source: string = 'search'): PlaylistItem => ({
-    // התיקון שלנו: אם אין ID, ניצור מזהה ייחודי מזויף כדי למנוע את באג הצביעה הכפולה
-    id: result.id || `broken-${crypto.randomUUID()}`,
-    title: result.title || 'שיר לא זמין',
+    id: result.id, // משתמשים ב-ID המקורי בלבד
+    title: result.title,
     author: result.author || result.channel || '',
     duration: parseDurationToSeconds(result.duration),
     thumbnail: result.thumbnail || result.thumbnail_url || '',
@@ -1814,8 +1813,8 @@ const App: React.FC = () => {
                                 <div className="space-y-1">
                                     {selectedPlaylist.songs.map((song, idx) => (
                                         <div key={song.id + idx} onClick={() => { if (!isLongPressRef.current) handlePlaySong(song, selectedPlaylist.songs, idx, false, selectedPlaylist.id); }} onTouchStart={() => { isLongPressRef.current = false; longPressTimer.current = setTimeout(() => { isLongPressRef.current = true; }, 500); }} onTouchEnd={() => clearTimeout(longPressTimer.current)} onTouchMove={() => clearTimeout(longPressTimer.current)} onContextMenu={(e) => { e.preventDefault(); clearTimeout(longPressTimer.current); handleRemoveSongWithConfirmation(song); }} className="flex items-center gap-3 p-2 rounded hover:bg-white/10 cursor-pointer">
-                                            <div className="w-8 text-center text-sm text-gray-400">{playerState.currentSong?.id === song.id && playerState.isPlaying ? <MusicIcon className="w-4 h-4 text-spotify-primary animate-pulse inline" /> : idx + 1}</div>
-                                            <div className="flex-1 min-w-0"> <div className={`font-medium truncate ${playerState.currentSong?.id === song.id ? 'text-spotify-primary' : ''}`}>{song.title}</div> <div className="text-xs text-gray-400 truncate">{song.author}</div> </div>
+                                            <div className="w-8 text-center text-sm text-gray-400">{playerState.currentSong?.id && song.id && playerState.currentSong.id === song.id && playerState.isPlaying ? <MusicIcon className="w-4 h-4 text-spotify-primary animate-pulse inline" /> : idx + 1}</div>
+                                            <div className="flex-1 min-w-0"> <div className={`font-medium truncate ${playerState.currentSong?.id && song.id && playerState.currentSong.id === song.id ? 'text-spotify-primary' : ''}`}>{song.title}</div> <div className="text-xs text-gray-400 truncate">{song.author}</div> </div>
                                             <div className="text-xs text-gray-500 font-mono">{formatDuration(song.duration)}</div>
                                             <div className="flex items-center"> <button onClick={(e) => { e.stopPropagation(); handleToggleLike(song); }} className={`p-2 ${likedSongsPlaylist?.songs.some(s => s.id === song.id) ? 'text-spotify-primary' : 'text-gray-400 hover:text-white'}`}> <HeartIcon filled={likedSongsPlaylist?.songs.some(s => s.id === song.id)} /> </button> {!selectedPlaylist.isLikedSongs && !selectedPlaylist.externalId && <button onClick={(e) => {e.stopPropagation(); setSongsToAdd([song]); setShowPlaylistSelector(true);}} className="p-2 text-gray-400 hover:text-white"> <PlusIcon /> </button>} </div>
                                         </div>
