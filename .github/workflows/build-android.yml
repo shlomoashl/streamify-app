@@ -40,6 +40,7 @@ jobs:
       run: npm run build
       env:        
         VITE_SERVER_URL: ${{ secrets.VITE_SERVER_URL }}
+        VITE_APP_ENTRY_CODE: ${{ secrets.VITE_APP_ENTRY_CODE }}
 
     # 6. מעביר את קבצי האתר לתוך תיקיית האנדרואיד
     - name: Sync Capacitor

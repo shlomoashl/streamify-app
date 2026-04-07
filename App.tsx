@@ -179,6 +179,7 @@ const PlaylistRow: React.FC<PlaylistComponentProps> = React.memo(({ playlist, on
 
 const App: React.FC = () => {
     const isDesktop = !Capacitor.isNativePlatform();
+    const SECRET_ENTRY_CODE = import.meta.env.VITE_APP_ENTRY_CODE || '1234321';
 
     // Init state with empty/default, then load async
     const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -264,6 +265,7 @@ const App: React.FC = () => {
     const [songsToAdd, setSongsToAdd] = useState<PlaylistItem[]>([]);
     
     const [emailInput, setEmailInput] = useState('');
+    const [entryCodeInput, setEntryCodeInput] = useState('');
     const [networkError, setNetworkError] = useState<string | null>(null);
     const [isOnline, setIsOnline] = useState(navigator.onLine);
     const prevOnlineStatus = useRef(isOnline);
@@ -1136,10 +1138,13 @@ const App: React.FC = () => {
 
     const handleLogin = (e: React.FormEvent) => { 
         e.preventDefault(); 
-        if (emailInput.includes('@')) { 
+        // עדכון התנאי שיבדוק גם את האימייל וגם את הקוד הסודי
+        if (emailInput.includes('@') && entryCodeInput === SECRET_ENTRY_CODE) { 
             storageService.saveData('streamify_user_email', emailInput);
             setCurrentUser({ email: emailInput, permissions: [], playlistPermission: 'edit' }); 
-        } 
+        } else {
+            alert('אימייל לא תקין או קוד כניסה שגוי');
+        }
     };
     
     const handleLogout = () => { 
@@ -1413,8 +1418,37 @@ const App: React.FC = () => {
         );
     }
 
-    if (!currentUser) { return ( <div className="h-screen w-full flex items-center justify-center bg-black p-4 text-white"> <div className="w-full max-w-md bg-spotify-elevated p-8 rounded-xl text-center"> <MusicIcon className="w-16 h-16 mx-auto mb-4 text-spotify-primary" /> <h1 className="text-2xl font-bold mb-4">התחברות</h1> <form onSubmit={handleLogin} className="space-y-4"> <input type="email" placeholder="אימייל" value={emailInput} onChange={e => setEmailInput(e.target.value)} className="w-full p-3 rounded bg-white/10 text-white" required /> <button className="w-full bg-spotify-primary text-black font-bold p-3 rounded-full">כניסה</button> </form> </div> </div> ); }
-
+    if (!currentUser) { 
+        return ( 
+            <div className="h-screen w-full flex items-center justify-center bg-black p-4 text-white"> 
+                <div className="w-full max-w-md bg-spotify-elevated p-8 rounded-xl text-center shadow-2xl border border-white/5"> 
+                    <MusicIcon className="w-16 h-16 mx-auto mb-4 text-spotify-primary" /> 
+                    <h1 className="text-2xl font-bold mb-6">ברוכים הבאים ל-Streamify</h1> 
+                    <form onSubmit={handleLogin} className="space-y-4"> 
+                        <input 
+                            type="email" 
+                            placeholder="אימייל" 
+                            value={emailInput} 
+                            onChange={e => setEmailInput(e.target.value)} 
+                            className="w-full p-3 rounded bg-white/10 text-white border border-transparent focus:border-spotify-primary focus:outline-none transition-all text-right" 
+                            required 
+                        /> 
+                        <input 
+                            type="password" 
+                            placeholder="קוד כניסה סודי" 
+                            value={entryCodeInput} 
+                            onChange={e => setEntryCodeInput(e.target.value)} 
+                            className="w-full p-3 rounded bg-white/10 text-white border border-transparent focus:border-spotify-primary focus:outline-none transition-all text-right" 
+                            required 
+                        /> 
+                        <button className="w-full bg-spotify-primary text-black font-bold p-3 rounded-full hover:scale-105 active:scale-95 transition-transform mt-2">
+                            כניסה למערכת
+                        </button> 
+                    </form> 
+                </div> 
+            </div> 
+        ); 
+    }
     // --- RENDER ---
     // (Render functions are mostly identical but with updated handlers)
 
