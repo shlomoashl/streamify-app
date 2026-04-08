@@ -44,13 +44,54 @@ const formatDuration = (seconds: number) => {
 };
 
 // Better Shuffle Algorithm (Fisher-Yates)
-const shuffleArray = <T,>(array: T[]): T[] => {
-    const newArr = [...array];
-    for (let i = newArr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+// Spotify-Style Balanced Shuffle Algorithm
+const shuffleArray = (array: PlaylistItem[]): PlaylistItem[] => {
+    if (array.length <= 2) return [...array]; // No need to balance tiny lists
+
+    // 1. Group songs by Author/Artist
+    const authorGroups = new Map<string, PlaylistItem[]>();
+    for (const song of array) {
+        const author = song.author || 'Unknown';
+        if (!authorGroups.has(author)) {
+            authorGroups.set(author, []);
+        }
+        authorGroups.get(author)!.push(song);
     }
-    return newArr;
+
+    // 2. Shuffle songs within each group (using Fisher-Yates)
+    for (const [author, songs] of authorGroups.entries()) {
+        for (let i = songs.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [songs[i], songs[j]] = [songs[j], songs[i]];
+        }
+    }
+
+    // 3. Build a sorted array of groups (largest groups first)
+    const groups = Array.from(authorGroups.values()).sort((a, b) => b.length - a.length);
+    const result: PlaylistItem[] = new Array(array.length);
+    let resultIndex = 0;
+
+    // 4. Distribute songs evenly across the result array
+    for (const group of groups) {
+        // Calculate the spacing required to spread this group's songs as far apart as possible
+        const spacing = array.length / group.length; 
+        
+        for (let i = 0; i < group.length; i++) {
+            // Find the next available empty slot, starting from the calculated spread position
+            let targetIndex = Math.floor(i * spacing) + (resultIndex % Math.floor(spacing || 1)); // Add slight offset per group
+            
+            // Wrap around and find actual empty slot
+            while (result[targetIndex % array.length] !== undefined) {
+                targetIndex++;
+            }
+            
+            result[targetIndex % array.length] = group[i];
+        }
+        resultIndex++;
+    }
+
+    // 5. Final fallback pass: Filter out any undefined (shouldn't happen with correct logic, but safe)
+    return result.filter(item => item !== undefined);
 };
 
 const searchResultToPlaylistItem = (result: YouTubeSearchResult, source: string = 'search'): PlaylistItem => ({
@@ -342,33 +383,51 @@ const App: React.FC = () => {
                                 if (playlist && playlist.songs.length > 0) {
                                     restoredPlaylistId = playlist.id;
                                     
-                                    // Try to restore queue from saved state if it matches (preserves shuffle order)
-                                    if (savedPlayerState && savedPlayerState.playingPlaylistId === restoredPlaylistId && savedPlayerState.queue && savedPlayerState.queue.length > 0) {
-                                         console.log("Restoring queue from saved state (preserves shuffle order)");
-                                         restoredQueue = savedPlayerState.queue;
-                                         originalQueueForState = savedPlayerState.originalQueue;
+                                    // 1. קודם כל לוקחים את התור הרגיל מהספרייה (כדי שיהיה מעודכן)
+                                    let baseQueue = playlist.songs;
+                                    
+                                    // 2. בודקים אם יש לנו תור שמור (ובעיקר תור מקורי) ב-State הישן
+                                    if (savedPlayerState && savedPlayerState.playingPlaylistId === restoredPlaylistId) {
+                                        console.log("Restoring queue context from saved state. Shuffle was:", savedIsShuffled);
+                                        
+                                        if (savedIsShuffled && savedPlayerState.originalQueue && savedPlayerState.queue) {
+                                            // אם ה-Shuffle היה דלוק ויש לנו את התור המעורבב שמור, נשתמש בו
+                                            // זה קריטי כדי שהשירים לא יתערבבו מחדש בכל פתיחה של האפליקציה
+                                            restoredQueue = savedPlayerState.queue;
+                                            originalQueueForState = savedPlayerState.originalQueue;
+                                        } else {
+                                            // אם לא היה Shuffle, או שאין מידע תקין, פשוט ניקח את התור הרגיל
+                                            restoredQueue = baseQueue;
+                                        }
                                     } else {
-                                        // Regenerate queue from playlist
-                                        restoredQueue = playlist.songs;
+                                        // מנגנון גיבוי: אם אין State שמור אבל ה-Shuffle הכללי מופעל
+                                        restoredQueue = baseQueue;
                                         if (savedIsShuffled) {
-                                            originalQueueForState = [...playlist.songs];
-                                            restoredQueue = shuffleArray([...playlist.songs]);
+                                            originalQueueForState = [...baseQueue];
+                                            restoredQueue = shuffleArray([...baseQueue]);
                                         }
                                     }
                                     
-                                    // Find song index in playlist to set current position correctly
+                                    // 3. מחפשים את השיר הנוכחי (מה-Native) בתוך התור ששחזרנו
                                     const songIndex = restoredQueue.findIndex(s => s.id === lastNative.id);
                                     if (songIndex !== -1) {
                                         restoredIndex = songIndex;
-                                        // Update song metadata from playlist to be sure we have duration
+                                        
+                                        // Update song metadata from playlist to be sure we have full details
                                         const foundSong = restoredQueue[songIndex];
                                         nativeSong.title = foundSong.title;
                                         nativeSong.author = foundSong.author;
                                         nativeSong.thumbnail = foundSong.thumbnail;
                                         nativeSong.duration = foundSong.duration;
-                                        console.log(`Context restored: Playlist "${playlist.name}", Index ${songIndex}, Queue Size: ${restoredQueue.length}`);
+                                        nativeSong.addedBy = foundSong.addedBy;
+                                        
+                                        console.log(`Context restored: Playlist "${playlist.name}", Index ${songIndex}, Queue Size: ${restoredQueue.length}, Shuffled: ${savedIsShuffled}`);
                                     } else {
-                                        console.warn("Song not found in restored playlist context, keeping single song queue.");
+                                        // גיבוי לגיבוי: אם השיר לא נמצא בתור (אולי הפלייליסט השתנה)
+                                        console.warn("Song not found in restored playlist context. Falling back to single song queue.");
+                                        restoredQueue = [nativeSong];
+                                        originalQueueForState = undefined;
+                                        // כאן אנחנו לא יכולים לדעת באמת אם ה-Shuffle רלוונטי
                                     }
                                 }
                             }
@@ -378,9 +437,9 @@ const App: React.FC = () => {
                                 isOpen: true,
                                 isPlaying: false, // Start paused
                                 currentSong: nativeSong,
-                                queue: restoredQueue, // Should be full list now
+                                queue: restoredQueue,
                                 currentIndex: restoredIndex,
-                                isShuffled: savedIsShuffled,
+                                isShuffled: savedIsShuffled, // <-- משתמשים במשתנה שחילצנו בתחילת הפונקציה!
                                 isExpanded: false,
                                 originalQueue: originalQueueForState
                             });
@@ -1254,6 +1313,7 @@ const App: React.FC = () => {
             
             // Sync with Native
             audioService.playQueue(newState.queue, newState.currentIndex, playingPlaylistId || undefined);
+            saveStateToStorage(newState, playingPlaylistId, 0);
             return newState;
         });
     };

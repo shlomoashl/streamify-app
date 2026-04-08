@@ -2,16 +2,14 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ]
-    tags:
-      - 'v*' # תוספת: הבוט יפעל גם כשאתה דוחף תגית של גרסה
+    branches: [ main, master ] # עכשיו הבוט ירוץ *רק* כשאתה עושה push רגיל
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # תוספת: חובה כדי שהבוט יקבל הרשאה ליצור עמוד Release
+      contents: write # הרשאה חובה ליצירת Release
 
     steps:
     # 1. מוריד את הקוד שלך לשרת של גיטהאב
@@ -64,17 +62,19 @@ jobs:
           -Pandroid.injected.signing.keyAlias=${{ secrets.KEY_ALIAS }} \
           -Pandroid.injected.signing.keyPassword=${{ secrets.KEY_PASSWORD }}
 
-    # 9. מעלה את קובץ ה-APK המוכן כ-Artifact (כמו שהיה לך קודם)
+    # 9. מעלה את קובץ ה-APK המוכן כ-Artifact (לגיבוי רגיל)
     - name: Upload Release APK
       uses: actions/upload-artifact@v4
       with:
         name: streamify-app-release.apk
         path: android/app/build/outputs/apk/release/app-release.apk
 
-    # 10. התוספת החדשה והקסומה: שחרור לעמוד ה-Releases
+    # 10. יוצר Release חדש בכל פעם שעושים Push!
     - name: Create GitHub Release and Upload APK
-      if: startsWith(github.ref, 'refs/tags/v') # ירוץ *רק* אם דחפת תגית כמו v1.0
       uses: softprops/action-gh-release@v1
       with:
+        # ממציא שם תגית לפי מספר הריצה כדי שלא תצטרך לכתוב תגיות בעצמך
+        tag_name: auto-build-android-${{ github.run_number }}
+        name: Streamify Android (Auto-Build ${{ github.run_number }})
         files: android/app/build/outputs/apk/release/app-release.apk
         generate_release_notes: true
