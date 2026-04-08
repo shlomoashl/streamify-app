@@ -502,39 +502,20 @@ const App: React.FC = () => {
         if (currentUser && libraryLoaded && !networkError && playerState.currentSong && !audioInitializedRef.current && !autoPlayStartedRef.current) {
             autoPlayStartedRef.current = true;
             console.log("Auto-play: Library loaded successfully. Scheduling attempt in 5 seconds...");
-            const timer = setTimeout(() => { triggerAutoPlay(); }, 5000);
+            const timer = setTimeout(() => { triggerAutoPlay(); }, 500);
             return () => clearTimeout(timer);
         }
     }, [currentUser, libraryLoaded, networkError]); 
 
-    useEffect(() => {
-        logger.init();
-        if (Capacitor.isNativePlatform()) KeepAwake.keepAwake();
-        const handleOnline = () => setIsOnline(true);
-        const handleOffline = () => { wasPlayingBeforeOffline.current = playerState.isPlaying; setIsOnline(false); };
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-        return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); };
-    }, [playerState.isPlaying]);
 
     useEffect(() => {
         if (isOnline && !prevOnlineStatus.current) {
-            console.log("Network connection restored.");
+            console.log("Network connection restored. Syncing library...");
             setNetworkError(null);
-            if (currentUser) fetchLibrary();
-            if (wasPlayingBeforeOffline.current && playerState.currentSong && !playerState.isPlaying) togglePlayPause();
-            wasPlayingBeforeOffline.current = false;
+            if (currentUser) fetchLibrary(); // רק מסנכרן ספרייה, הניגון מנוהל ב-Capacitor
         }
         prevOnlineStatus.current = isOnline;
     }, [isOnline, currentUser]);
-
-    useEffect(() => {
-        let interval: any;
-        if (networkError && currentUser) {
-            interval = setInterval(() => { fetchLibrary(true); }, 5000);
-        }
-        return () => { if (interval) clearInterval(interval); };
-    }, [networkError, currentUser]);
 
     const saveStateToStorage = (state: PlayerState, currentPlaylistId: string | null, currentTimeVal: number) => {
         if (!stateLoadedRef.current) return; // Don't save if we haven't loaded initial state yet
@@ -1302,42 +1283,37 @@ const App: React.FC = () => {
     
     useEffect(() => {
         // Network Listener for Auto-Resume
-        Network.addListener('networkStatusChange', status => {
+        const networkListener = Network.addListener('networkStatusChange', status => {
+            setIsOnline(status.connected);
+            
             if (status.connected) {
                 setNetworkError(null);
+                // הערה: משיכת הספרייה מנוהלת כעת ב-useEffect הקודם בצורה בטוחה
+                
                 if (wasPlayingRef.current) {
-                    console.log("[App] Network restored, resuming playback...");
-                    // Small delay to ensure connection is stable
+                    console.log("[App] Network restored, resuming playback after short stabilization delay...");
                     setTimeout(() => {
                         audioService.resume();
                         setPlayerState(prev => ({ ...prev, isPlaying: true }));
-                    }, 2000);
+                        wasPlayingRef.current = false;
+                    }, 1000); 
                 }
             } else {
                 setNetworkError("אין חיבור לאינטרנט");
-                // Save current playing state
                 setPlayerState(prev => {
                     if (prev.isPlaying) {
                         wasPlayingRef.current = true;
-                        audioService.pause(); // Pause internally to stop errors
-                        return { ...prev, isPlaying: false }; // Update UI
+                        audioService.pause();
+                        return { ...prev, isPlaying: false };
                     }
                     return prev;
                 });
             }
         });
 
-        // App State Listener (Focus) - Prevent unwanted auto-resume
-        CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+        // App State Listener (Focus)
+        const appStateListener = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
             console.log(`[App] App State Changed. Active: ${isActive}`);
-            if (!isActive) {
-                // App went to background. Do NOT pause here if we want background playback.
-                // But we can ensure we don't accidentally trigger resume logic elsewhere.
-            } else {
-                // App came to foreground.
-                // Explicitly DO NOTHING here to prevent "Telegram" issue.
-                // The native plugin handles background playback.
-            }
         });
 
         const stateListener = audioService.addListener('stateChange', (data: any) => { setPlayerState(prev => ({ ...prev, isPlaying: data.isPlaying })); });
@@ -1360,7 +1336,17 @@ const App: React.FC = () => {
              navigator.mediaSession.setActionHandler('previoustrack', () => handlersRef.current.handlePrev());
         }
 
-        return () => { stateListener.remove(); endListener.remove(); errorListener.remove(); transitionListener.remove(); audioService.cleanup(); };
+        return () => { 
+            stateListener.remove(); 
+            endListener.remove(); 
+            errorListener.remove(); 
+            transitionListener.remove(); 
+            audioService.cleanup(); 
+            
+            // ניקוי המאזינים החדשים - קריטי למניעת קריסות באנדרואיד!
+            networkListener.then(l => l.remove());
+            appStateListener.then(l => l.remove());
+        };
     }, []);
 
     
