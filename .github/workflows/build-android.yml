@@ -73,8 +73,6 @@ jobs:
     - name: Create GitHub Release and Upload APK
       uses: softprops/action-gh-release@v1
       with:
-        # ממציא שם תגית לפי מספר הריצה כדי שלא תצטרך לכתוב תגיות בעצמך
-        tag_name: auto-build-android-${{ github.run_number }}
-        name: Streamify Android (Auto-Build ${{ github.run_number }})
+        tag_name: latest-build # שם קבוע!
+        name: Streamify (Latest Auto-Build)
         files: android/app/build/outputs/apk/release/app-release.apk
-        generate_release_notes: true

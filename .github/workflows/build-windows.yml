@@ -48,11 +48,8 @@ jobs:
     - name: Create GitHub Release and Upload Windows App
       uses: softprops/action-gh-release@v1
       with:
-        # במקום תגית שאנחנו כותבים (כמו v1.0), נשתמש במספר הריצה של גיטהאב
-        tag_name: auto-build-${{ github.run_number }} 
-        name: Streamify Windows (Auto-Build ${{ github.run_number }})
-        # תופס את קבצי ההתקנה
+        tag_name: latest-build # בדיוק אותו שם!
+        name: Streamify (Latest Auto-Build)
         files: |
           src-tauri/target/release/bundle/msi/*.msi
           src-tauri/target/release/bundle/nsis/*.exe
-        generate_release_notes: true
