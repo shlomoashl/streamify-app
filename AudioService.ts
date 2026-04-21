@@ -444,48 +444,63 @@ class AudioService {
             });
         }
 
-        console.log('[AudioService] Attempting direct native playback...');
-        
-        // 1. ננסה קודם לנגן את זה כקובץ אודיו רגיל וחסכוני (WebM / MP4)
-        this.webAudio.src = url;
-        this.webAudio.load();
-        
-        this.webAudio.onloadeddata = () => {
-            console.log('[AudioService] Direct media loaded successfully!');
-            this.safePlay();
-            this.webAudio!.onerror = null; // מנקה מאזיני שגיאות ברגע שהצלחנו
-        };
+        if (Hls.isSupported()) {
+            console.log('[AudioService] Using HLS.js');
+            this.hls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+                debug: false,
+                manifestLoadTimeout: 15000,
+                levelLoadTimeout: 15000,
+                fragLoadTimeout: 15000,
+                fragLoadMaxRetry: 2,
+                fragLoadRetryDelay: 500,
+                fragLoadBackoffFactor: 1.2,
+            });            
+            this.hls.loadSource(url);
+            this.hls.attachMedia(this.webAudio);
+            
+            this.hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+                console.log('[AudioService] HLS Manifest parsed, starting playback');
+                this.safePlay();
+            });
+            
+            this.hls.on(Hls.Events.LEVEL_LOADED, (event, data) => {
+                if (data.details.totalduration) {
+                    this.emit('durationChange', { duration: data.details.totalduration });
+                }
+            });
 
-        // 2. אם נכשלנו (למשל, הדפדפן לא תומך או שזה בכל זאת פלייליסט HLS) - נפעיל HLS.js
-        this.webAudio.onerror = () => {
-            console.log('[AudioService] Native playback failed (likely M3U8). Falling back to HLS.js...');
-            if (Hls.isSupported()) {
-                this.hls = new Hls({
-                    enableWorker: true,
-                    lowLatencyMode: true,
-                    debug: false,
-                });            
-                this.hls.loadSource(url);
-                this.hls.attachMedia(this.webAudio!);
-                
-                this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    console.log('[AudioService] HLS Manifest parsed, starting playback');
-                    this.safePlay();
-                });
-                
-                this.hls.on(Hls.Events.ERROR, (event, data) => {
-                    if (data.fatal) {
-                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) this.hls?.startLoad();
-                        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) this.hls?.recoverMediaError();
-                        else this.hls?.destroy();
+            this.hls.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    switch (data.type) {
+                        case Hls.ErrorTypes.NETWORK_ERROR:
+                            console.log("[AudioService] HLS Network error, trying to recover...");
+                            this.hls?.startLoad();
+                            break;
+                        case Hls.ErrorTypes.MEDIA_ERROR:
+                            console.log("[AudioService] HLS Media error, trying to recover...");
+                            this.hls?.recoverMediaError();
+                            break;
+                        default:
+                            console.error("[AudioService] HLS Fatal error, destroying...", data);
+                            this.hls?.destroy();
+                            break;
                     }
-                });
-            } else if (this.webAudio!.canPlayType('application/vnd.apple.mpegurl')) {
-                // Safari fallback
-                this.webAudio!.src = url;
-                this.webAudio!.onloadedmetadata = () => this.safePlay();
-            }
-        };
+                } else {
+                    console.warn("[AudioService] HLS Non-fatal error:", data.type);
+                }
+            });
+
+        } else if (this.webAudio.canPlayType('application/vnd.apple.mpegurl')) {
+            console.log('[AudioService] Using Native HLS (Safari)');
+            this.webAudio.src = url;
+            this.webAudio.onloadedmetadata = () => {
+                this.safePlay();
+            };
+        } else {
+            console.error("HLS is not supported in this browser.");
+        }
     }
 
     public async pause() {
