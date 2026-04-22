@@ -35,15 +35,18 @@ class AudioService {
     }
 
     private getStreamUrl(videoId: string): string {
-        // אם אנחנו בתוך האפליקציה (Native) - בווינדוס או באנדרואיד
-        // והפלאגין הנייטיב תקין (לא ב-fallback)
-        if (this.isNative && !this.fallbackToWeb) {
-            console.log(`[AudioService] App detected: Using Direct Audio (m4a)`);
+        // בודקים אם אנחנו באפליקציה: 
+        // 1. או שזה נייטיב אמיתי (אנדרואיד/iOS)
+        // 2. או שזה ווינדוס/ווב אבל ה-User Agent מכיל 'streamify'
+        const isStreamifyApp = this.isNative || navigator.userAgent.toLowerCase().includes('streamify');
+
+        if (isStreamifyApp && !this.fallbackToWeb) {
+            console.log(`[AudioService] Streamify App detected: Using Direct Audio (m4a)`);
             return `${YOUTUBE_API_BASE}/get_audio/${videoId}`;
         }
         
-        // רק אם מישהו נכנס דרך דפדפן רגיל (Web) הוא יקבל M3U8
-        console.log(`[AudioService] Web browser detected: Using HLS (m3u8)`);
+        // אם זה אתר אינטרנט רגיל (גולש שנכנס מדפדפן כרום/אדג' וכו')
+        console.log(`[AudioService] Regular Website detected: Using HLS (m3u8)`);
         return `${YOUTUBE_API_BASE}/get_m3u8/${videoId}`;
     }
 
@@ -428,6 +431,7 @@ class AudioService {
     private async playWeb(item: PlaylistItem, url: string) {
         if (!this.webAudio) return;
 
+        // ניקוי HLS ישן אם קיים
         if (this.hls) {
             this.hls.destroy();
             this.hls = null;
@@ -441,6 +445,19 @@ class AudioService {
             });
         }
 
+        // --- התוספת החדשה: הזרמה ישירה של M4A ללא HLS ---
+        if (url.includes('/get_audio/')) {
+            console.log('[AudioService] Playing direct audio (m4a) natively via HTML5');
+            this.webAudio.src = url;
+            this.webAudio.load();
+            this.webAudio.onloadedmetadata = () => {
+                this.safePlay();
+            };
+            return; // אנחנו יוצאים מכאן, אין צורך להמשיך לקוד של HLS
+        }
+        // ---------------------------------------------------
+
+        // קוד פולבאק למקרה שאי פעם תחזור ל-M3U8
         if (Hls.isSupported()) {
             console.log('[AudioService] Using HLS.js');
             this.hls = new Hls({
@@ -457,7 +474,7 @@ class AudioService {
             this.hls.loadSource(url);
             this.hls.attachMedia(this.webAudio);
             
-            this.hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+            this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
                 console.log('[AudioService] HLS Manifest parsed, starting playback');
                 this.safePlay();
             });
