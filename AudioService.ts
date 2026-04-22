@@ -34,13 +34,24 @@ class AudioService {
         }
     }
 
+    // פונקציית עזר שקובעת את הכתובת לפי סוג המכשיר
+    private getStreamUrl(videoId: string): string {
+        const isAndroid = Capacitor.getPlatform() === 'android';
+        // שימוש בסטרים ישיר (m4a) רק באנדרואיד נייטיב
+        if (this.isNative && isAndroid && !this.fallbackToWeb) {
+            return `${YOUTUBE_API_BASE}/get_audio/${videoId}`;
+        }
+        // פלייליסט (m3u8) עבור ווב, ווינדוס ו-iOS
+        return `${YOUTUBE_API_BASE}/get_m3u8/${videoId}`;
+    }
+
     private setupWebAudio() {
-        if (this.webAudio) return; // Avoid double initialization
+        if (this.webAudio) return; // מניעת אתחול כפול
 
         console.log('[AudioService] Setting up Web Audio (HLS/HTML5)');
         this.webAudio = new Audio();
         
-        // Basic Event Listeners
+        // מאזיני אירועים בסיסיים
         this.webAudio.addEventListener('timeupdate', () => {
             this.emit('timeUpdate', { currentTime: this.webAudio?.currentTime || 0 });
         });
@@ -51,33 +62,30 @@ class AudioService {
             }
         });
 
-        // AUTO-ADVANCE LOGIC FOR WEB/WINDOWS
+        // לוגיקת מעבר אוטומטי לשיר הבא (עבור Web/Windows)
         this.webAudio.addEventListener('ended', () => {
             console.log('[AudioService] Playback ended');
             
-            // Check if we have a queue and a next song
             if (this.webQueue.length > 0 && this.webCurrentIndex < this.webQueue.length - 1) {
                 this.webCurrentIndex++;
                 const nextSong = this.webQueue[this.webCurrentIndex];
                 console.log(`[AudioService] Web Auto-Advance to: ${nextSong.title}`);
                 
-                // Play next song
-                const url = `${YOUTUBE_API_BASE}/get_m3u8/${nextSong.id}`;
+                // שינוי 1: שימוש ב-getStreamUrl
+                const url = this.getStreamUrl(nextSong.id);
                 this.playWeb(nextSong, url);
                 
-                // Notify UI of transition (Simulate Native behavior)
                 this.emit('itemTransition', { id: nextSong.id });
                 
-                // PREFETCH / WARMUP THE NEXT 1 SONG ONLY (Reduced from 3)
-                // DELAYED to ensure current song loads first
+                // הכנה מראש של השיר הבא בתור
                 setTimeout(() => {
                     if (this.webCurrentIndex + 1 < this.webQueue.length) {
                         const futureSong = this.webQueue[this.webCurrentIndex + 1];
-                        this.triggerServerSideWarmup(`${YOUTUBE_API_BASE}/get_m3u8/${futureSong.id}`);
+                        // שינוי 2: שימוש ב-getStreamUrl עבור ה-Warmup
+                        this.triggerServerSideWarmup(this.getStreamUrl(futureSong.id));
                     }
-                }, 3000); // 3 Seconds delay
+                }, 3000);
             } else {
-                // Really finished
                 this.emit('ended', {});
                 this.emit('stateChange', { isPlaying: false });
             }
@@ -98,19 +106,19 @@ class AudioService {
              this.emit('error', { error: e });
         });
         
-        // Setup MediaSession for Web
+        // הגדרות MediaSession (שליטה דרך המקלדת/מסך נעילה בווינדוס)
         if ('mediaSession' in navigator) {
             navigator.mediaSession.setActionHandler('play', () => this.resume());
             navigator.mediaSession.setActionHandler('pause', () => this.pause());
             
             navigator.mediaSession.setActionHandler('nexttrack', () => {
-                // Implement manual next for Media Keys on Windows
                 if (this.webQueue.length > 0 && this.webCurrentIndex < this.webQueue.length - 1) {
                     this.webCurrentIndex++;
                     const nextSong = this.webQueue[this.webCurrentIndex];
-                    this.playWeb(nextSong, `${YOUTUBE_API_BASE}/get_m3u8/${nextSong.id}`);
+                    // שינוי 3: שימוש ב-getStreamUrl עבור כפתור "הבא"
+                    this.playWeb(nextSong, this.getStreamUrl(nextSong.id));
                     this.emit('itemTransition', { id: nextSong.id });
-                    this.emit('remoteNext', {}); // Also emit remoteNext for UI sync if needed
+                    this.emit('remoteNext', {});
                 }
             });
 
@@ -118,7 +126,8 @@ class AudioService {
                  if (this.webQueue.length > 0 && this.webCurrentIndex > 0) {
                     this.webCurrentIndex--;
                     const prevSong = this.webQueue[this.webCurrentIndex];
-                    this.playWeb(prevSong, `${YOUTUBE_API_BASE}/get_m3u8/${prevSong.id}`);
+                    // שינוי 4: שימוש ב-getStreamUrl עבור כפתור "הקודם"
+                    this.playWeb(prevSong, this.getStreamUrl(prevSong.id));
                     this.emit('itemTransition', { id: prevSong.id });
                     this.emit('remotePrev', {});
                 }
@@ -191,22 +200,19 @@ class AudioService {
         try {
             const fileName = `cache/${song.id}.mp3`;
             try {
-                // Check if file already exists
                 await Filesystem.stat({
                     path: fileName,
                     directory: Directory.Cache
                 });
                 console.log(`[AudioService] Preload: File ${fileName} already exists.`);
                 return;
-            } catch (e) {
-                // File doesn't exist, proceed to download
-            }
+            } catch (e) {}
 
             console.log(`[AudioService] Preloading next song: ${song.title}`);
             
-            // 1. Trigger server-side warmup (keep existing logic)
-            const m3u8Url = `${YOUTUBE_API_BASE}/get_m3u8/${song.id}`;
-            this.triggerServerSideWarmup(m3u8Url);
+            // 1. Trigger server-side warmup
+            const streamUrl = this.getStreamUrl(song.id); // <--- שינוי כאן
+            this.triggerServerSideWarmup(streamUrl);
 
         } catch (error) {
             console.error("[AudioService] Preload failed:", error);
@@ -218,19 +224,25 @@ class AudioService {
      * This reduces latency when the user eventually switches to this song.
      * Optimized to barely use bandwidth.
      */
-    private async triggerServerSideWarmup(m3u8Url: string) {
-        if (!m3u8Url) return;
+    private async triggerServerSideWarmup(streamUrl: string) {
+        if (!streamUrl) return;
         
         try {
-            // 1. Fetch M3U8 Manifest
-            // This tells the backend to run yt-dlp and generate the manifest
-            const response = await fetch(m3u8Url);
+            // התוספת החשובה: אם זה URL של שמע (אנדרואיד), אל תנסה לפרסס כטקסט
+            if (streamUrl.includes('/get_audio/')) {
+                console.log(`[AudioService] Warmup: Direct audio ping -> ${streamUrl}`);
+                const controller = new AbortController();
+                fetch(streamUrl, { signal: controller.signal })
+                    .catch(() => { /* Ignore abort error */ });
+                setTimeout(() => controller.abort(), 500); 
+                return;
+            }
+
+            // --- מכאן והלאה הלוגיקה המקורית שלך עבור M3U8 ---
+            const response = await fetch(streamUrl);
             if (!response.ok) return;
             
             const text = await response.text();
-
-            // 2. Parse Manifest to find first segment URL
-            // The backend returns a list of URLs (some might be relative proxies)
             const lines = text.split('\n');
             let firstSegmentUrl = '';
             
@@ -243,26 +255,17 @@ class AudioService {
             }
 
             if (firstSegmentUrl) {
-                // Ensure absolute URL if it's relative
                 if (!firstSegmentUrl.startsWith('http')) {
-                    // FIX: Use SERVER_PUBLIC_URL for relative paths from backend, not window.location.origin
-                    // This ensures it works on Windows app / Android where origin is local.
                     const baseUrl = SERVER_PUBLIC_URL.endsWith('/') ? SERVER_PUBLIC_URL.slice(0, -1) : SERVER_PUBLIC_URL;
                     firstSegmentUrl = baseUrl + (firstSegmentUrl.startsWith('/') ? '' : '/') + firstSegmentUrl;
                 }
 
                 console.log(`[AudioService] Warmup: Touching segment -> ${firstSegmentUrl}`);
 
-                // 3. Touch the segment to trigger backend streaming
-                // We use AbortController to kill the connection immediately after it starts.
-                // We just want the server to start the pipe, we don't need the data yet.
                 const controller = new AbortController();
                 fetch(firstSegmentUrl, { signal: controller.signal })
                     .then(res => {
-                        // Wait a tiny fraction to ensure server received request and started pipe
-                        setTimeout(() => {
-                            controller.abort();
-                        }, 500); 
+                        setTimeout(() => controller.abort(), 500); 
                     })
                     .catch(() => { /* Ignore abort error */ });
             }
@@ -330,7 +333,6 @@ class AudioService {
     public async playQueue(items: PlaylistItem[], startIndex: number, contextId?: string) {
         if (!items || items.length === 0) return;
         
-        // Update local queue state for both Native and Web to support preloading
         this.webQueue = items;
         this.webCurrentIndex = startIndex;
         
@@ -338,14 +340,13 @@ class AudioService {
 
         if (this.isNative && !this.fallbackToWeb) {
             try {
-                // Preload next song immediately
                 if (startIndex + 1 < items.length) {
                     this.preloadNext(items[startIndex + 1]);
                 }
 
                 const mediaItems = items.map(item => ({
                     id: item.id,
-                    url: `${YOUTUBE_API_BASE}/get_m3u8/${item.id}`,
+                    url: this.getStreamUrl(item.id), // <--- שינוי כאן: השתמשנו בפונקציה
                     title: item.title,
                     artist: item.author,
                     artwork: item.thumbnail || 'https://via.placeholder.com/500',
@@ -355,33 +356,25 @@ class AudioService {
                 await StreamifyMedia.playQueue({
                     items: mediaItems,
                     startIndex: startIndex,
-                    contextId: contextId // Pass context ID to Native
+                    contextId: contextId
                 } as PlayQueueOptions);
             } catch (e) {
                 console.error("Native playQueue failed", e);
             }
         } else {
-            // Web / Windows Fallback Logic
-            
-            // 1. Update Internal State
             this.webQueue = [...items];
             this.webCurrentIndex = startIndex;
             
             const song = items[startIndex];
-            const url = `${YOUTUBE_API_BASE}/get_m3u8/${song.id}`;
+            const url = this.getStreamUrl(song.id); // <--- שינוי כאן: השתמשנו בפונקציה
             
-            // 2. Play Current Song (IMMEDIATELY)
             this.playWeb(song, url);
             
-            // 3. PREFETCH / WARMUP NEXT 1 SONG ONLY (Reduced from 3)
-            // CRITICAL: We wait 3 seconds before starting the warmup requests
-            // This ensures the current song has fully negotiated, buffered, and started playing
-            // without network contention.
             setTimeout(() => {
                 const nextIndex = startIndex + 1;
                 if (nextIndex < items.length) {
                     const nextSong = items[nextIndex];
-                    const nextUrl = `${YOUTUBE_API_BASE}/get_m3u8/${nextSong.id}`;
+                    const nextUrl = this.getStreamUrl(nextSong.id); // <--- שינוי כאן: השתמשנו בפונקציה
                     this.triggerServerSideWarmup(nextUrl);
                 }
             }, 3000);
