@@ -33,8 +33,7 @@ public class PlaybackService extends MediaSessionService {
     public void onCreate() {
         super.onCreate();
         
-        // CRITICAL: Must match the User-Agent expected by the server logic
-        String userAgent = "Streamify";
+        String userAgent = "Streamify Android App";
         
         DefaultHttpDataSource.Factory httpDataSourceFactory = new DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
@@ -42,25 +41,21 @@ public class PlaybackService extends MediaSessionService {
             .setConnectTimeoutMs(30000)
             .setReadTimeoutMs(30000);
 
+        // --- כאן אנחנו מלבישים את המפענח שלנו על תעבורת הרשת ---
+        DataSource.Factory xorDataSourceFactory = () -> new XorDataSource(httpDataSourceFactory.createDataSource());
+
         DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(this)
-            .setDataSourceFactory(httpDataSourceFactory);
+            .setDataSourceFactory(xorDataSourceFactory); // הנגן ימשוך נתונים רק דרך המפענח
+            
         androidx.media3.exoplayer.DefaultLoadControl loadControl = new androidx.media3.exoplayer.DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                10000, // מינימום באפר: 10 שניות
-                20000, // מקסימום באפר: 20 שניות (במקום ה-50 המקורי)
-                1500,  // זמן באפר מינימלי כדי להתחיל לנגן שוב אחרי תקיעה
-                2500   // זמן באפר מינימלי כדי להתחיל לנגן בפעם הראשונה
-            ).build();
-        // Standard ExoPlayer without 'ForwardingPlayer' interception.
-        // This allows the player to automatically proceed to the next item in the queue
-        // even if the JavaScript layer is paused/killed in the background.
+            .setBufferDurationsMs(10000, 20000, 1500, 2500).build();
+
         player = new ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .setHandleAudioBecomingNoisy(true)
             .build();
 
-        // Add listener to save state when song changes (Passive observation)
         player.addListener(new Player.Listener() {
             @Override
             public void onMediaItemTransition(@Nullable MediaItem mediaItem, int reason) {
@@ -76,10 +71,7 @@ public class PlaybackService extends MediaSessionService {
             .build();
         player.setAudioAttributes(audioAttributes, true);
 
-        // Build the MediaSession to allow Lock Screen / Bluetooth controls
         mediaSession = new MediaSession.Builder(this, player).build();
-
-        // Restore immediately so notification shows up even before playing
         restoreLastPlayedSong();
     }
 
