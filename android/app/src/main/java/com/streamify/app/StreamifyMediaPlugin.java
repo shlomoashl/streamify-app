@@ -450,7 +450,8 @@ public class StreamifyMediaPlugin extends Plugin {
                 MediaItem mediaItem = new MediaItem.Builder()
                     .setUri(url)
                     .setMediaId(call.getString("id", ""))
-                    .setMimeType(MimeTypes.AUDIO_MP4)
+                    // .setMimeType(MimeTypes.AUDIO_MP4)
+                    .setMimeType(MimeTypes.AUDIO_WEBM)
                     .setMediaMetadata(metadata)
                     .build();
 
@@ -515,7 +516,8 @@ public class StreamifyMediaPlugin extends Plugin {
                          MediaItem mediaItem = new MediaItem.Builder()
                             .setUri(item.getString("url"))
                             .setMediaId(item.getString("id"))
-                            .setMimeType(MimeTypes.AUDIO_MP4)
+                            // .setMimeType(MimeTypes.AUDIO_MP4)
+                            .setMimeType(MimeTypes.AUDIO_WEBM)
                             .setMediaMetadata(metadata)
                             .build();
                          mediaItems.add(mediaItem);
@@ -582,7 +584,8 @@ public class StreamifyMediaPlugin extends Plugin {
                 MediaItem mediaItem = new MediaItem.Builder()
                     .setUri(url)
                     .setMediaId(call.getString("id", ""))
-                    .setMimeType(MimeTypes.AUDIO_MP4) 
+                    // .setMimeType(MimeTypes.AUDIO_MP4)
+                    .setMimeType(MimeTypes.AUDIO_WEBM)
                     .setMediaMetadata(metadata)
                     .build();
 
