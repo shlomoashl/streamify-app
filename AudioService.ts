@@ -278,6 +278,7 @@ class AudioService {
     }
 
     public async play(item: PlaylistItem, url: string, contextId?: string) {
+        url = this.getStreamUrl(item.id);
         console.log(`[AudioService] Play request for "${item.title}" (ID: ${item.id})`);
 
         if (!this.isNative || this.fallbackToWeb) {
@@ -384,6 +385,7 @@ class AudioService {
     }
 
     public async addToQueue(item: PlaylistItem, url: string, contextId?: string) {
+        url = this.getStreamUrl(item.id);
         if (this.isNative && !this.fallbackToWeb) {
             console.log(`[AudioService] Queueing next: "${item.title}"`);
             try {
