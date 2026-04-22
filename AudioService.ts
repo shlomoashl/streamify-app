@@ -35,19 +35,9 @@ class AudioService {
     }
 
     private getStreamUrl(videoId: string): string {
-        const origin = window.location.origin;
-        // זיהוי אם אנחנו בתוך האפליקציה (ווינדוס או אנדרואיד)
-        // בדרך כלל באפליקציות המקור הוא localhost או התחלה של capacitor://
-        const isApp = origin.includes('localhost') || origin.startsWith('capacitor://');
-
-        if (isApp && !this.fallbackToWeb) {
-            console.log(`[AudioService] Streamify App detected (Origin: ${origin}). Using Audio-Only Route.`);
-            return `${YOUTUBE_API_BASE}/get_audio/${videoId}`;
-        }
-        
-        // אם הגענו מכאן, זה כנראה האתר בדפדפן - נשתמש ב-M3U8 עבור הוידאו
-        console.log(`[AudioService] Website detected. Using HLS Route.`);
-        return `${YOUTUBE_API_BASE}/get_m3u8/${videoId}`;
+        // פשוט וישיר: האפליקציה תמיד מבקשת את ראוט האודיו הנקי.
+        // השרת כבר ידע לטפל ב-Range (הדילוגים והמשכיות השיר) בזכות התיקון ב-Python.
+        return `${YOUTUBE_API_BASE}/get_audio/${videoId}`;
     }
 
     private setupWebAudio() {
@@ -431,12 +421,13 @@ class AudioService {
     private async playWeb(item: PlaylistItem, url: string) {
         if (!this.webAudio) return;
 
-        // ניקוי HLS ישן אם קיים
+        // ניקוי מופע HLS קודם אם קיים כדי למנוע זליגות זיכרון והתנגשויות
         if (this.hls) {
             this.hls.destroy();
             this.hls = null;
         }
 
+        // עדכון MediaSession - מאפשר שליטה מהמקלדת, מסך הנעילה ותצוגת מטא-דאטה במערכת ההפעלה
         if ('mediaSession' in navigator) {
             navigator.mediaSession.metadata = new MediaMetadata({
                 title: item.title,
@@ -445,21 +436,26 @@ class AudioService {
             });
         }
 
-        // --- התוספת החדשה: הזרמה ישירה של M4A ללא HLS ---
+        /**
+         * בדיקה האם מדובר בסטרים ישיר של אודיו (m4a).
+         * אם ה-URL מכיל את הראוט החדש שלנו, ננגן אותו ישירות דרך נגן ה-HTML5
+         * ללא שימוש ב-HLS.js, מה שמאפשר תמיכה מלאה ב-Range Requests (דילוגים והמשכיות).
+         */
         if (url.includes('/get_audio/')) {
-            console.log('[AudioService] Playing direct audio (m4a) natively via HTML5');
+            console.log('[AudioService] Playing direct audio stream (m4a) natively');
             this.webAudio.src = url;
             this.webAudio.load();
             this.webAudio.onloadedmetadata = () => {
                 this.safePlay();
             };
-            return; // אנחנו יוצאים מכאן, אין צורך להמשיך לקוד של HLS
+            return; // יציאה מהפונקציה - אין צורך בלוגיקה של HLS
         }
-        // ---------------------------------------------------
 
-        // קוד פולבאק למקרה שאי פעם תחזור ל-M3U8
+        /**
+         * פולבאק ל-HLS: עבור האתר או במקרים בהם נדרש וידאו/סטרים מבוסס מקטעים.
+         */
         if (Hls.isSupported()) {
-            console.log('[AudioService] Using HLS.js');
+            console.log('[AudioService] Using HLS.js for stream');
             this.hls = new Hls({
                 enableWorker: true,
                 lowLatencyMode: true,
@@ -471,6 +467,7 @@ class AudioService {
                 fragLoadRetryDelay: 500,
                 fragLoadBackoffFactor: 1.2,
             });            
+            
             this.hls.loadSource(url);
             this.hls.attachMedia(this.webAudio);
             
@@ -501,19 +498,18 @@ class AudioService {
                             this.hls?.destroy();
                             break;
                     }
-                } else {
-                    console.warn("[AudioService] HLS Non-fatal error:", data.type);
                 }
             });
 
         } else if (this.webAudio.canPlayType('application/vnd.apple.mpegurl')) {
-            console.log('[AudioService] Using Native HLS (Safari)');
+            // תמיכה ב-Native HLS עבור דפדפני Safari
+            console.log('[AudioService] Using Native HLS');
             this.webAudio.src = url;
             this.webAudio.onloadedmetadata = () => {
                 this.safePlay();
             };
         } else {
-            console.error("HLS is not supported in this browser.");
+            console.error("[AudioService] No supported playback method found for this URL.");
         }
     }
 
