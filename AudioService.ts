@@ -34,14 +34,16 @@ class AudioService {
         }
     }
 
-    // פונקציית עזר שקובעת את הכתובת לפי סוג המכשיר
     private getStreamUrl(videoId: string): string {
-        const isAndroid = Capacitor.getPlatform() === 'android';
-        // שימוש בסטרים ישיר (m4a) רק באנדרואיד נייטיב
-        if (this.isNative && isAndroid && !this.fallbackToWeb) {
+        // אם אנחנו בתוך האפליקציה (Native) - בווינדוס או באנדרואיד
+        // והפלאגין הנייטיב תקין (לא ב-fallback)
+        if (this.isNative && !this.fallbackToWeb) {
+            console.log(`[AudioService] App detected: Using Direct Audio (m4a)`);
             return `${YOUTUBE_API_BASE}/get_audio/${videoId}`;
         }
-        // פלייליסט (m3u8) עבור ווב, ווינדוס ו-iOS
+        
+        // רק אם מישהו נכנס דרך דפדפן רגיל (Web) הוא יקבל M3U8
+        console.log(`[AudioService] Web browser detected: Using HLS (m3u8)`);
         return `${YOUTUBE_API_BASE}/get_m3u8/${videoId}`;
     }
 
