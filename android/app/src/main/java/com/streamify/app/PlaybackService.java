@@ -139,7 +139,7 @@ public class PlaybackService extends MediaSessionService {
                 MediaItem mediaItem = new MediaItem.Builder()
                     .setUri(url)
                     .setMediaId(id)
-                    .setMimeType(MimeTypes.APPLICATION_M3U8)
+                    .setMimeType(MimeTypes.AUDIO_MP4)
                     .setMediaMetadata(metadata)
                     .build();
 
