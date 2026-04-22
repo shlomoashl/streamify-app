@@ -35,18 +35,18 @@ class AudioService {
     }
 
     private getStreamUrl(videoId: string): string {
-        // בודקים אם אנחנו באפליקציה: 
-        // 1. או שזה נייטיב אמיתי (אנדרואיד/iOS)
-        // 2. או שזה ווינדוס/ווב אבל ה-User Agent מכיל 'streamify'
-        const isStreamifyApp = this.isNative || navigator.userAgent.toLowerCase().includes('streamify');
+        const origin = window.location.origin;
+        // זיהוי אם אנחנו בתוך האפליקציה (ווינדוס או אנדרואיד)
+        // בדרך כלל באפליקציות המקור הוא localhost או התחלה של capacitor://
+        const isApp = origin.includes('localhost') || origin.startsWith('capacitor://');
 
-        if (isStreamifyApp && !this.fallbackToWeb) {
-            console.log(`[AudioService] Streamify App detected: Using Direct Audio (m4a)`);
+        if (isApp && !this.fallbackToWeb) {
+            console.log(`[AudioService] Streamify App detected (Origin: ${origin}). Using Audio-Only Route.`);
             return `${YOUTUBE_API_BASE}/get_audio/${videoId}`;
         }
         
-        // אם זה אתר אינטרנט רגיל (גולש שנכנס מדפדפן כרום/אדג' וכו')
-        console.log(`[AudioService] Regular Website detected: Using HLS (m3u8)`);
+        // אם הגענו מכאן, זה כנראה האתר בדפדפן - נשתמש ב-M3U8 עבור הוידאו
+        console.log(`[AudioService] Website detected. Using HLS Route.`);
         return `${YOUTUBE_API_BASE}/get_m3u8/${videoId}`;
     }
 
