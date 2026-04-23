@@ -44,6 +44,11 @@ jobs:
     - name: Sync Capacitor
       run: npx cap sync android
 
+    # מעדכן את ה-versionCode לפי מספר הריצה של ה-Workflow בגיטהאב
+    - name: Bump Version Code
+      run: |
+        sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/" android/app/build.gradle
+
     # 7. מפענח את קובץ החתימה הסודי שלך מתוך גיטהאב
     - name: Decode Keystore
       env:
