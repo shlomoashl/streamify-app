@@ -306,28 +306,6 @@ const App: React.FC = () => {
         isExpanded: false
     });
 
-    const isInitialMount = useRef(true);
-
-    // השומר ששומר כל החלפת שיר לזיכרון של הרכב
-    useEffect(() => {
-        // מדלגים על הפתיחה הראשונה של האפליקציה כדי לא לדרוס את הזיכרון
-        if (isInitialMount.current) {
-            isInitialMount.current = false;
-            return;
-        }
-
-        // בכל פעם שהשיר מתחלף (אוטומטית או ידנית) - שומרים מחדש את המצב
-        if (playerState.currentSong && playerState.queue.length > 0) {
-            storageService.saveData('streamify_last_state', {
-                currentSong: playerState.currentSong,
-                queue: playerState.queue,
-                currentIndex: playerState.currentIndex,
-                isShuffled: playerState.isShuffled,
-                originalQueue: playerState.originalQueue
-            });
-            localStorage.setItem('last_played_position', '0');
-        }
-    }, [playerState.currentSong?.id, playerState.currentIndex]);
 
     const audioInitializedRef = useRef(false);
     const skipLockRef = useRef(false);
@@ -1442,12 +1420,29 @@ const App: React.FC = () => {
             }
         });        
         const transitionListener = audioService.addListener('itemTransition', (data: any) => {
-             setPlayerState(prev => {
-                 const newIdx = prev.queue.findIndex(s => s.id === data.id);
-                 if (newIdx === -1) return prev;
-                 const newSong = prev.queue[newIdx];
-                 return { ...prev, currentIndex: newIdx, currentSong: newSong, isPlaying: true };
-             });
+            setPlayerState(prev => {
+                if (!prev.queue || prev.queue.length === 0) return prev;
+                
+                const newIndex = data.index !== undefined ? data.index : 0;
+                const newSong = prev.queue[newIndex] || prev.currentSong;
+                
+                const newState = { ...prev, currentSong: newSong, currentIndex: newIndex };
+                
+                // התיקון: ברגע שהנגן עובר שיר אוטומטית - שומרים מיד לזיכרון!
+                if (newSong) {
+                    storageService.saveData('streamify_last_state', {
+                        currentSong: newSong,
+                        queue: newState.queue,
+                        currentIndex: newIndex,
+                        isShuffled: newState.isShuffled,
+                        originalQueue: newState.originalQueue
+                    });
+                    // מאפסים את הזמן השמור כדי שהשיר החדש יתחיל מההתחלה בפתיחה הבאה
+                    localStorage.setItem('last_played_position', '0');
+                }
+                
+                return newState;
+            });
         });
         const errorListener = audioService.addListener('error', (data: any) => {
             if (navigator.onLine && !skipLockRef.current) { skipLockRef.current = true; setTimeout(() => { handlersRef.current.handleNext(); skipLockRef.current = false; }, 1500); }
