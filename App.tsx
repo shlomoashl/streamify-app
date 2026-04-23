@@ -272,16 +272,37 @@ const App: React.FC = () => {
     }>({ isOpen: false, playlist: null });
 
     const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+    const [playlistDisplayLimit, setPlaylistDisplayLimit] = useState(30);
+    const observerTarget = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                // ברגע שהלקוח גלל למטה ורואה את האלמנט השקוף - נטען עוד 30 שירים
+                if (entries[0].isIntersecting && selectedPlaylist && playlistDisplayLimit < selectedPlaylist.songs.length) {
+                    setPlaylistDisplayLimit(prev => prev + 30);
+                }
+            },
+            { threshold: 0.1 }
+        );
+
+        if (observerTarget.current) {
+            observer.observe(observerTarget.current);
+        }
+
+        return () => observer.disconnect();
+    }, [selectedPlaylist, playlistDisplayLimit]);
     
     const [playlistViewMode, setPlaylistViewMode] = useState<'grid' | 'list'>('grid');
 
+    const savedShuffle = localStorage.getItem('streamify_shuffle') === 'true';
     const [playerState, setPlayerState] = useState<PlayerState>({
         isOpen: false,
         isPlaying: false,
         currentSong: null,
         queue: [],
         currentIndex: 0,
-        isShuffled: false,
+        isShuffled: savedShuffle, // לוקח מהזיכרון
         isExpanded: false
     });
 
@@ -545,12 +566,20 @@ const App: React.FC = () => {
     const triggerAutoPlay = async () => {
         if (audioInitializedRef.current) return;
         if (!playerState.currentSong) return;
-        console.log(`Auto-play attempt (5s delay)...`);
+        console.log(`Auto-play attempt...`);
         try {
             setPlayerState(prev => ({ ...prev, isPlaying: true }));
-            // Pass contextId (playlistId) if available
             await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);
             audioInitializedRef.current = true;
+            
+            // משיכת המיקום השמור ודילוג אליו
+            const savedPosition = parseFloat(localStorage.getItem('last_played_position') || '0');
+            if (savedPosition > 3) {
+                // נותנים לנגן חצי שנייה להתחיל לנגן לפני הדילוג החכם
+                setTimeout(() => {
+                    audioService.seek(savedPosition);
+                }, 500);
+            }
         } catch (e) {
             console.error(`Auto-play failed:`, e);
             setPlayerState(prev => ({ ...prev, isPlaying: false }));
@@ -595,6 +624,7 @@ const App: React.FC = () => {
         }
         setPlaylistSearchQuery('');
         setPlaylistSearchResults([]);
+        setPlaylistDisplayLimit(30); // מאפסים את הרשימה ל-30 בכל פעם שנכנסים לפלייליסט
     }, [selectedPlaylist?.id]);
 
 
@@ -1232,7 +1262,7 @@ const App: React.FC = () => {
         }
         setPlayingPlaylistId(playlistId);
         setPlayerState(prev => ({ ...prev, isOpen: true, isPlaying: true, currentSong: song, queue: finalQueue, currentIndex: finalIndex, isShuffled: prev.isShuffled, originalQueue: (playerState.isShuffled || isPlaylistStartAction) ? finalOriginalQueue : undefined, isExpanded: window.innerWidth < 768 }));    
-
+        localStorage.setItem('last_played_position', '0');
         // PASS PLAYLIST ID AS CONTEXT
         audioService.playQueue(finalQueue, finalIndex, playlistId || undefined);
     };
@@ -1291,32 +1321,31 @@ const App: React.FC = () => {
 
     const toggleShuffle = () => {
         setPlayerState(prev => {
-            if (!prev.currentSong || !prev.queue || prev.queue.length < 2) return { ...prev, isShuffled: !prev.isShuffled };
+            if (!prev.currentSong || !prev.queue || prev.queue.length < 2) {
+                const simpleNewState = !prev.isShuffled;
+                localStorage.setItem('streamify_shuffle', String(simpleNewState));
+                return { ...prev, isShuffled: simpleNewState };
+            }
             
             const isEnablingShuffle = !prev.isShuffled;
             let newState: PlayerState;
     
             if (isEnablingShuffle) {
-                // Switching ON: create a NEW random shuffle
                 const originalQueue = prev.originalQueue || prev.queue;
                 let shuffledQueue = shuffleArray([...originalQueue]);
-                
-                // Move current song to front
                 const newIndex = shuffledQueue.findIndex(s => s.id === prev.currentSong!.id);
                 if (newIndex > 0) { 
                     const current = shuffledQueue.splice(newIndex, 1)[0]; 
                     shuffledQueue.unshift(current); 
                 }
-                
                 newState = { ...prev, isShuffled: true, queue: shuffledQueue, currentIndex: 0, originalQueue: originalQueue };
             } else {
-                // Switching OFF: restore original order
                 const originalOrderQueue = prev.originalQueue || prev.queue;
                 const newIndex = originalOrderQueue.findIndex(s => s.id === prev.currentSong!.id);
                 newState = { ...prev, isShuffled: false, queue: originalOrderQueue, currentIndex: newIndex !== -1 ? newIndex : 0, originalQueue: undefined };
             }
             
-            // Sync with Native
+            localStorage.setItem('streamify_shuffle', String(newState.isShuffled)); // שומר לזיכרון!
             audioService.playQueue(newState.queue, newState.currentIndex, playingPlaylistId || undefined);
             saveStateToStorage(newState, playingPlaylistId, 0);
             return newState;
@@ -1383,6 +1412,12 @@ const App: React.FC = () => {
 
         const stateListener = audioService.addListener('stateChange', (data: any) => { setPlayerState(prev => ({ ...prev, isPlaying: data.isPlaying })); });
         const endListener = audioService.addListener('ended', () => { setPlayerState(prev => ({ ...prev, isPlaying: false })); });
+        // שומר את המיקום כל 5 שניות לזיכרון המקומי
+        const timeListener = audioService.addListener('timeUpdate', (data: any) => {
+            if (data.currentTime > 0 && Math.floor(data.currentTime) % 5 === 0) {
+                localStorage.setItem('last_played_position', data.currentTime.toString());
+            }
+        });        
         const transitionListener = audioService.addListener('itemTransition', (data: any) => {
              setPlayerState(prev => {
                  const newIdx = prev.queue.findIndex(s => s.id === data.id);
@@ -1406,6 +1441,7 @@ const App: React.FC = () => {
             endListener.remove(); 
             errorListener.remove(); 
             transitionListener.remove(); 
+            timeListener.remove();
             audioService.cleanup(); 
             
             // ניקוי המאזינים החדשים - קריטי למניעת קריסות באנדרואיד!
@@ -1896,7 +1932,7 @@ const App: React.FC = () => {
                                 </div>
 
                                 <div className="space-y-1">
-                                    {selectedPlaylist.songs.map((song, idx) => (
+                                    {selectedPlaylist.songs.slice(0, playlistDisplayLimit).map((song, idx) => (
                                         <div key={song.id + idx} onClick={() => { if (!isLongPressRef.current) handlePlaySong(song, selectedPlaylist.songs, idx, false, selectedPlaylist.id); }} onTouchStart={() => { isLongPressRef.current = false; longPressTimer.current = setTimeout(() => { isLongPressRef.current = true; }, 500); }} onTouchEnd={() => clearTimeout(longPressTimer.current)} onTouchMove={() => clearTimeout(longPressTimer.current)} onContextMenu={(e) => { e.preventDefault(); clearTimeout(longPressTimer.current); handleRemoveSongWithConfirmation(song); }} className="flex items-center gap-3 p-2 rounded hover:bg-white/10 cursor-pointer">
                                             <div className="w-8 text-center text-sm text-gray-400">{playerState.currentSong?.id && song.id && playerState.currentSong.id === song.id && playerState.isPlaying ? <MusicIcon className="w-4 h-4 text-spotify-primary animate-pulse inline" /> : idx + 1}</div>
                                             <div className="flex-1 min-w-0"> <div className={`font-medium truncate ${playerState.currentSong?.id && song.id && playerState.currentSong.id === song.id ? 'text-spotify-primary' : ''}`}>{song.title}</div> <div className="text-xs text-gray-400 truncate">{song.author}</div> </div>
@@ -1904,6 +1940,13 @@ const App: React.FC = () => {
                                             <div className="flex items-center"> <button onClick={(e) => { e.stopPropagation(); handleToggleLike(song); }} className={`p-2 ${likedSongsPlaylist?.songs.some(s => s.id === song.id) ? 'text-spotify-primary' : 'text-gray-400 hover:text-white'}`}> <HeartIcon filled={likedSongsPlaylist?.songs.some(s => s.id === song.id)} /> </button> {!selectedPlaylist.isLikedSongs && !selectedPlaylist.externalId && <button onClick={(e) => {e.stopPropagation(); setSongsToAdd([song]); setShowPlaylistSelector(true);}} className="p-2 text-gray-400 hover:text-white"> <PlusIcon /> </button>} </div>
                                         </div>
                                     ))}
+                                    
+                                    {/* אלמנט הגשש (Trigger) - נטען אוטומטית כשמגיעים אליו */}
+                                    {selectedPlaylist.songs.length > playlistDisplayLimit && (
+                                        <div ref={observerTarget} className="h-16 w-full flex items-center justify-center">
+                                            <span className="text-gray-500 text-sm animate-pulse">טוען...</span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {!selectedPlaylist.id.startsWith('temp-') && !selectedPlaylist.isLikedSongs && !selectedPlaylist.externalId && (
