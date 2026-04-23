@@ -558,13 +558,18 @@ const App: React.FC = () => {
     };
 
     useEffect(() => {
-        if (currentUser && libraryLoaded && !networkError && playerState.currentSong && !audioInitializedRef.current && !autoPlayStartedRef.current) {
+        // Fast-Track Autoplay: לא מחכים יותר לסנכרון הספרייה הכבד!
+        // מתחילים לנגן מיד ברגע שיש חיבור רשת בסיסי (isOnline) ויש שיר בזיכרון.
+        if (currentUser && isAppReady && isOnline && playerState.currentSong && !audioInitializedRef.current && !autoPlayStartedRef.current) {
             autoPlayStartedRef.current = true;
-            console.log("Auto-play: Library loaded successfully. Scheduling attempt in 5 seconds...");
-            const timer = setTimeout(() => { triggerAutoPlay(); }, 500);
+            console.log("Fast Auto-play: Starting immediately based on cached state + Network!");
+            
+            // נותנים השהייה של שנייה אחת בלבד כדי לתת לחיבור ה-4G של האוטו להתייצב 
+            // לפני שמושכים את השיר מיוטיוב
+            const timer = setTimeout(() => { triggerAutoPlay(); }, 1000);
             return () => clearTimeout(timer);
         }
-    }, [currentUser, libraryLoaded, networkError]); 
+    }, [currentUser, isAppReady, isOnline, playerState.currentSong]);
 
 
     useEffect(() => {
