@@ -249,32 +249,6 @@ const App: React.FC = () => {
     const stateLoadedRef = useRef(false); // Ref to track if initial player state has been loaded
     
     const [playingPlaylistId, setPlayingPlaylistId] = useState<string | null>(null);
-    const isInitialMount = useRef(true);
-
-    // השומר ששומר כל החלפת שיר לזיכרון של הרכב
-    useEffect(() => {
-        // מדלגים על הפתיחה הראשונה של האפליקציה כדי לא לדרוס את הזיכרון
-        if (isInitialMount.current) {
-            isInitialMount.current = false;
-            return;
-        }
-
-        // בכל פעם שהשיר מתחלף (אוטומטית או ידנית) - שומרים מחדש את המצב
-        if (playerState.currentSong && playerState.queue.length > 0) {
-            
-            // 1. שומרים את השיר החדש לזיכרון!
-            storageService.saveData('streamify_last_state', {
-                currentSong: playerState.currentSong,
-                queue: playerState.queue,
-                currentIndex: playerState.currentIndex,
-                isShuffled: playerState.isShuffled,
-                originalQueue: playerState.originalQueue
-            });
-            
-            // 2. מאפסים את הזמן השמור, כדי שהשיר החדש יתחיל מאפס ולא מהאמצע
-            localStorage.setItem('last_played_position', '0');
-        }
-    }, [playerState.currentSong?.id, playerState.currentIndex]);
 
     const [inputModal, setInputModal] = useState<{
         isOpen: boolean;
@@ -331,6 +305,29 @@ const App: React.FC = () => {
         isShuffled: savedShuffle, // לוקח מהזיכרון
         isExpanded: false
     });
+
+    const isInitialMount = useRef(true);
+
+    // השומר ששומר כל החלפת שיר לזיכרון של הרכב
+    useEffect(() => {
+        // מדלגים על הפתיחה הראשונה של האפליקציה כדי לא לדרוס את הזיכרון
+        if (isInitialMount.current) {
+            isInitialMount.current = false;
+            return;
+        }
+
+        // בכל פעם שהשיר מתחלף (אוטומטית או ידנית) - שומרים מחדש את המצב
+        if (playerState.currentSong && playerState.queue.length > 0) {
+            storageService.saveData('streamify_last_state', {
+                currentSong: playerState.currentSong,
+                queue: playerState.queue,
+                currentIndex: playerState.currentIndex,
+                isShuffled: playerState.isShuffled,
+                originalQueue: playerState.originalQueue
+            });
+            localStorage.setItem('last_played_position', '0');
+        }
+    }, [playerState.currentSong?.id, playerState.currentIndex]);
 
     const audioInitializedRef = useRef(false);
     const skipLockRef = useRef(false);
