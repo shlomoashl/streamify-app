@@ -401,6 +401,38 @@ class AudioService {
         }
     }
 
+    public async skipTo(index: number) {
+        if (!this.webQueue || this.webQueue.length <= index) return;
+        
+        this.webCurrentIndex = index;
+        console.log(`[AudioService] Skipping seamlessly to index: ${index}`);
+
+        if (this.isNative && !this.fallbackToWeb) {
+            try {
+                // דילוג טבעי של ExoPlayer
+                await (StreamifyMedia as any).skipToIndex({ index });
+                
+                // מכינים (Warmup) את השיר שבא אחריו כדי שגם המעבר הבא יהיה מיידי
+                if (index + 1 < this.webQueue.length) {
+                    this.preloadNext(this.webQueue[index + 1]);
+                }
+            } catch (e) {
+                console.error("Native skip failed", e);
+            }
+        } else {
+            // בווינדוס/ווב נפעיל כרגיל
+            const song = this.webQueue[index];
+            const url = this.getStreamUrl(song.id);
+            this.playWeb(song, url);
+            
+            setTimeout(() => {
+                if (index + 1 < this.webQueue.length) {
+                    this.triggerServerSideWarmup(this.getStreamUrl(this.webQueue[index + 1].id));
+                }
+            }, 3000);
+        }
+    }
+    
     public async addToQueue(item: PlaylistItem, url: string, contextId?: string) {
         url = this.getStreamUrl(item.id);
         if (this.isNative && !this.fallbackToWeb) {

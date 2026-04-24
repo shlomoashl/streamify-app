@@ -1266,28 +1266,35 @@ const App: React.FC = () => {
         }
     };
 
-    const handleNext = useCallback(() => { 
-        audioInitializedRef.current = true;
-        setPlayerState(prev => { 
-            if (!prev.queue || prev.queue.length === 0) return prev; 
-            const nextIdx = (prev.currentIndex + 1) % prev.queue.length; 
-            const nextSong = prev.queue[nextIdx];
-            // Pass current playlist ID context
-            audioService.playQueue(prev.queue, nextIdx, playingPlaylistId || undefined);
-            return { ...prev, currentIndex: nextIdx, currentSong: nextSong, isPlaying: true }; 
-        }); 
-    }, [playingPlaylistId]);
+    const handleNext = useCallback(() => {
+        setPlayerState(prev => {
+            if (!prev.queue || prev.queue.length === 0) return prev;
+            let nextIndex = prev.currentIndex + 1;
+            if (nextIndex >= prev.queue.length) {
+                nextIndex = 0; // חזרה להתחלה אם הגענו לסוף
+            }
+            
+            // התיקון: אנחנו קוראים ל-skipTo במקום לשלוח ל-playQueue מחדש!
+            audioService.skipTo(nextIndex);
+            
+            return { ...prev, currentIndex: nextIndex, currentSong: prev.queue[nextIndex] };
+        });
+    }, []);
 
-    const handlePrev = useCallback(() => { 
-        audioInitializedRef.current = true;
-        setPlayerState(prev => { 
-            if (!prev.queue || prev.queue.length === 0) return prev; 
-            const prevIdx = (prev.currentIndex - 1 + prev.queue.length) % prev.queue.length; 
-            const prevSong = prev.queue[prevIdx];
-            audioService.playQueue(prev.queue, prevIdx, playingPlaylistId || undefined);
-            return { ...prev, currentIndex: prevIdx, currentSong: prevSong, isPlaying: true }; 
-        }); 
-    }, [playingPlaylistId]);
+    const handlePrev = useCallback(() => {
+        setPlayerState(prev => {
+            if (!prev.queue || prev.queue.length === 0) return prev;
+            let prevIndex = prev.currentIndex - 1;
+            if (prevIndex < 0) {
+                prevIndex = prev.queue.length - 1; // קפיצה לשיר האחרון
+            }
+            
+            // התיקון: דילוג חלק
+            audioService.skipTo(prevIndex);
+            
+            return { ...prev, currentIndex: prevIndex, currentSong: prev.queue[prevIndex] };
+        });
+    }, []);
 
     const toggleShuffle = () => {
         setPlayerState(prev => {
