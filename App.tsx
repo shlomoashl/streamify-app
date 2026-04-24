@@ -1392,12 +1392,23 @@ const App: React.FC = () => {
             }
         });
 
-        const transitionListener = audioService.addListener('itemTransition', (data: any) => {
+    const transitionListener = audioService.addListener('itemTransition', (data: any) => {
             setPlayerState(prev => {
                 if (!prev.queue || prev.queue.length === 0) return prev;
-                const newIndex = data.index !== undefined ? data.index : 0;
+                
+                let newIndex = prev.currentIndex;
+                
+                // התיקון: אנחנו מחפשים קודם כל לפי ה-ID שהנגן שולח לנו!
+                if (data.id) {
+                    const foundIndex = prev.queue.findIndex(s => s.id === data.id);
+                    if (foundIndex !== -1) {
+                        newIndex = foundIndex;
+                    }
+                } else if (data.index !== undefined) {
+                    newIndex = data.index;
+                }
+                
                 const newSong = prev.queue[newIndex] || prev.currentSong;
-                // כאן אנחנו רק מעדכנים את התצוגה. ה-useEffect ששמנו למעלה יתפוס את זה וישמור לזיכרון מיד!
                 return { ...prev, currentSong: newSong, currentIndex: newIndex };
             });
         });
