@@ -327,13 +327,14 @@ class AudioService {
     }
 
     // הוספנו את startPosition לפונקציה
-    public async playQueue(items: PlaylistItem[], startIndex: number, contextId?: string, startPosition: number = 0) {
+    // הורדנו את startPosition מההגדרה
+    public async playQueue(items: PlaylistItem[], startIndex: number, contextId?: string) {
         if (!items || items.length === 0) return;
         
         this.webQueue = items;
         this.webCurrentIndex = startIndex;
         
-        console.log(`[AudioService] Playing Queue. Size: ${items.length}, Start: ${startIndex}, Pos: ${startPosition}`);
+        console.log(`[AudioService] Playing Queue. Size: ${items.length}, Start: ${startIndex}`);
 
         if (this.isNative && !this.fallbackToWeb) {
             try {
@@ -353,24 +354,19 @@ class AudioService {
                 await StreamifyMedia.playQueue({
                     items: mediaItems,
                     startIndex: startIndex,
-                    contextId: contextId,
-                    startPosition: startPosition // שולחים את המיקום ל-Java
+                    contextId: contextId
+                    // הסרנו את שליחת startPosition ל-Native
                 } as any);
             } catch (e) {
                 console.error("Native playQueue failed", e);
             }
         } else {
-            // ... (שאר קוד ה-Web נשאר ללא שינוי)
+            // הבלוק של ה-Web נקי - רק מפעיל את השיר ומכין את הבא
             this.webQueue = [...items];
             this.webCurrentIndex = startIndex;
             
             const song = items[startIndex];
-            let url = this.getStreamUrl(song.id); // <--- חובה לשנות ל-let כדי להוסיף את הזמן
-            
-            // מוסיפים את דילוג הזמן לכתובת אם יש צורך
-            if (startPosition > 0) {
-                url = `${url}#t=${startPosition}`;
-            }
+            let url = this.getStreamUrl(song.id); 
             
             this.playWeb(song, url);
             
@@ -378,7 +374,7 @@ class AudioService {
                 const nextIndex = startIndex + 1;
                 if (nextIndex < items.length) {
                     const nextSong = items[nextIndex];
-                    const nextUrl = this.getStreamUrl(nextSong.id); // <--- שינוי כאן: השתמשנו בפונקציה
+                    const nextUrl = this.getStreamUrl(nextSong.id); 
                     this.triggerServerSideWarmup(nextUrl);
                 }
             }, 3000);

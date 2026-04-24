@@ -310,25 +310,13 @@ const App: React.FC = () => {
     const lastSavedSongIdRef = useRef<string | null>(null);
 
     useEffect(() => {
-        // שומרים את הסטייט רק אם האפליקציה מוכנה והנתונים נטענו
         if (isAppReady && playerState.currentSong && playerState.queue && playerState.queue.length > 0) {
-            
             const stateToSave = { 
                 ...playerState, 
-                savedTime: 0, 
                 playingPlaylistId: playingPlaylistId 
             };
             delete (stateToSave as any).originalQueue;
             storageService.saveData('streamify_player_state', stateToSave);
-
-            // תיקון קריטי: מאפסים ל-0 רק אם זה באמת שיר *אחר* ממה ששמרנו קודם
-            // ורק אם זו לא הפעם הראשונה שהאפליקציה עולה
-            if (lastSavedSongIdRef.current && lastSavedSongIdRef.current !== playerState.currentSong.id) {
-                console.log("New song detected - resetting saved position to 0");
-                localStorage.setItem('last_played_position', '0');
-            }
-            
-            lastSavedSongIdRef.current = playerState.currentSong.id;
         }
     }, [playerState.currentSong?.id, playerState.currentIndex, playerState.isShuffled, isAppReady]);
     // --- סוף תוספת ---
@@ -555,16 +543,12 @@ const App: React.FC = () => {
         if (audioInitializedRef.current || !playerState.currentSong) return;
         
         try {
-            console.log(`Professional Auto-play Start...`);
-            
-            // קוראים את המיקום השמור
-            const savedPosition = parseFloat(localStorage.getItem('last_played_position') || '0');
-            
+            console.log(`Auto-play Start (Song only)...`);
             setPlayerState(prev => ({ ...prev, isPlaying: true }));
             audioInitializedRef.current = true;
 
-            // התיקון האמיתי: אנחנו שולחים ל-AudioService את המיקום (savedPosition) מראש!
-            await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined, savedPosition);
+            // מפעילים רגיל, בלי startPosition!
+            await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);
             
         } catch (e) {
             console.error(`Auto-play failed:`, e);
