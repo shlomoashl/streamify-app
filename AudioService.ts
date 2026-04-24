@@ -326,8 +326,6 @@ class AudioService {
         }
     }
 
-    // הוספנו את startPosition לפונקציה
-    // הורדנו את startPosition מההגדרה
     public async playQueue(items: PlaylistItem[], startIndex: number, contextId?: string) {
         if (!items || items.length === 0) return;
         
@@ -342,26 +340,48 @@ class AudioService {
                     this.preloadNext(items[startIndex + 1]);
                 }
 
-                const mediaItems = items.map(item => ({
-                    id: item.id,
-                    url: this.getStreamUrl(item.id),
-                    title: item.title,
-                    artist: item.author,
-                    artwork: item.thumbnail || 'https://via.placeholder.com/500',
-                    duration: typeof item.duration === 'number' ? item.duration : 0
+                // התיקון: חזרנו לבדוק אם השיר עבר חימום ונמצא מקומית על המכשיר!
+                const mediaItems = await Promise.all(items.map(async item => {
+                    let playUrl = this.getStreamUrl(item.id);
+                    
+                    try {
+                        const fileName = `cache/${item.id}.mp3`;
+                        const stat = await Filesystem.stat({
+                            path: fileName,
+                            directory: Directory.Cache
+                        });
+                        if (stat) {
+                            const uriResult = await Filesystem.getUri({
+                                path: fileName,
+                                directory: Directory.Cache
+                            });
+                            playUrl = Capacitor.convertFileSrc(uriResult.uri);
+                            console.log(`[AudioService] Using local cache for queue item: ${playUrl}`);
+                        }
+                    } catch (e) {
+                        // הקובץ עדיין לא ב-cache, ינגן מהרשת בינתיים
+                    }
+
+                    return {
+                        id: item.id,
+                        url: playUrl,
+                        title: item.title,
+                        artist: item.author,
+                        artwork: item.thumbnail || 'https://via.placeholder.com/500',
+                        duration: typeof item.duration === 'number' ? item.duration : 0
+                    };
                 }));
                 
                 await StreamifyMedia.playQueue({
                     items: mediaItems,
                     startIndex: startIndex,
                     contextId: contextId
-                    // הסרנו את שליחת startPosition ל-Native
                 } as any);
             } catch (e) {
                 console.error("Native playQueue failed", e);
             }
         } else {
-            // הבלוק של ה-Web נקי - רק מפעיל את השיר ומכין את הבא
+            // הבלוק של ה-Web נשאר רגיל ונקי
             this.webQueue = [...items];
             this.webCurrentIndex = startIndex;
             
