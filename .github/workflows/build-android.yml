@@ -2,55 +2,56 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master ] # עכשיו הבוט ירוץ *רק* כשאתה עושה push רגיל
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # הרשאה חובה ליצירת Release
 
     steps:
+    # 1. מוריד את הקוד שלך לשרת של גיטהאב
     - name: Checkout code
       uses: actions/checkout@v4
 
+    # 2. מתקין Node.js
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
 
+    # 3. מתקין Java
     - name: Setup Java
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '17'
 
+    # 4. מתקין את כל הספריות של הפרויקט שלך
     - name: Install dependencies
       run: npm install
 
+    # 5. בונה את אפליקציית ה-Web
     - name: Build Web App
       run: npm run build
       env:        
         VITE_SERVER_URL: ${{ secrets.VITE_SERVER_URL }}
         VITE_APP_ENTRY_CODE: ${{ secrets.VITE_APP_ENTRY_CODE }}
 
+    # 6. מעביר את קבצי האתר לתוך תיקיית האנדרואיד
     - name: Sync Capacitor
       run: npx cap sync android
 
-    # עדכון ה-versionCode - קריטי למניעת שגיאות עדכון בטלפון
-    - name: Bump Version Code
-      run: |
-        sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/" android/app/build.gradle
-        echo "Build Number: ${{ github.run_number }}"
-
-    # שלב התיקון: שומרים את המפתח ישירות בתיקיית ה-app
+    # 7. מפענח את קובץ החתימה הסודי שלך מתוך גיטהאב
     - name: Decode Keystore
       env:
         ENCODED_STRING: ${{ secrets.KEYSTORE_BASE64 }}
       run: |
-        echo $ENCODED_STRING | base64 -d > android/app/my-release-key.keystore
+        echo $ENCODED_STRING | base64 -d > android/my-release-key.keystore
 
+    # 8. מקמפל את אפליקציית האנדרואיד וחותם עליה
     - name: Build and Sign Release APK
       working-directory: ./android
       run: |
@@ -61,15 +62,17 @@ jobs:
           -Pandroid.injected.signing.keyAlias=${{ secrets.KEY_ALIAS }} \
           -Pandroid.injected.signing.keyPassword=${{ secrets.KEY_PASSWORD }}
 
+    # 9. מעלה את קובץ ה-APK המוכן כ-Artifact (לגיבוי רגיל)
     - name: Upload Release APK
       uses: actions/upload-artifact@v4
       with:
-        name: streamify-app-${{ github.run_number }}
+        name: streamify-app-release.apk
         path: android/app/build/outputs/apk/release/app-release.apk
 
-    - name: Create GitHub Release
+    # 10. יוצר Release חדש בכל פעם שעושים Push!
+    - name: Create GitHub Release and Upload APK
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: build-${{ github.run_number }}
-        name: Streamify Update #${{ github.run_number }}
+        tag_name: latest-build # שם קבוע!
+        name: Streamify (Latest Auto-Build)
         files: android/app/build/outputs/apk/release/app-release.apk

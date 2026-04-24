@@ -693,4 +693,18 @@ public class StreamifyMediaPlugin extends Plugin {
              }
         });
     }
+
+    @PluginMethod
+    public void skipToIndex(PluginCall call) {
+        handler.post(() -> {
+            if (controller != null) {
+                Integer index = call.getInt("index", 0);
+                controller.seekToDefaultPosition(index);
+                controller.play();
+                call.resolve();
+            } else {
+                call.reject("Player not initialized");
+            }
+        });
+    }
 }

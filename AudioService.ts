@@ -225,11 +225,6 @@ class AudioService {
         try {
             // התוספת החשובה: אם זה URL של שמע (אנדרואיד), אל תנסה לפרסס כטקסט
             if (streamUrl.includes('/get_audio/')) {
-                console.log(`[AudioService] Warmup: Direct audio ping -> ${streamUrl}`);
-                const controller = new AbortController();
-                fetch(streamUrl, { signal: controller.signal })
-                    .catch(() => { /* Ignore abort error */ });
-                setTimeout(() => controller.abort(), 500); 
                 return;
             }
 
@@ -377,6 +372,27 @@ class AudioService {
         }
     }
 
+    public async skipTo(index: number) {
+        if (!this.webQueue || this.webQueue.length <= index) return;
+        this.webCurrentIndex = index;
+        
+        if (this.isNative && !this.fallbackToWeb) {
+            try {
+                // דילוג טבעי בתוך התור הקיים של אנדרואיד בלי למחוק את החימום
+                await (StreamifyMedia as any).skipToIndex({ index });
+            } catch (e) { console.error("Native skip failed", e); }
+        } else {
+            const song = this.webQueue[index];
+            this.playWeb(song, this.getStreamUrl(song.id));
+            
+            setTimeout(() => {
+                if (index + 1 < this.webQueue.length) {
+                    this.triggerServerSideWarmup(this.getStreamUrl(this.webQueue[index + 1].id));
+                }
+            }, 3000);
+        }
+    }
+    
     public async addToQueue(item: PlaylistItem, url: string, contextId?: string) {
         url = this.getStreamUrl(item.id);
         if (this.isNative && !this.fallbackToWeb) {

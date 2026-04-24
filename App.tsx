@@ -1294,11 +1294,13 @@ const App: React.FC = () => {
             if (!prev.queue || prev.queue.length === 0) return prev; 
             const nextIdx = (prev.currentIndex + 1) % prev.queue.length; 
             const nextSong = prev.queue[nextIdx];
-            // Pass current playlist ID context
-            audioService.playQueue(prev.queue, nextIdx, playingPlaylistId || undefined);
+            
+            // התיקון: משתמשים בפונקציית הדילוג המהירה במקום לשלוח את כל התור מחדש
+            audioService.skipTo(nextIdx);
+            
             return { ...prev, currentIndex: nextIdx, currentSong: nextSong, isPlaying: true }; 
         }); 
-    }, [playingPlaylistId]);
+    }, []);
 
     const handlePrev = useCallback(() => { 
         audioInitializedRef.current = true;
@@ -1306,10 +1308,13 @@ const App: React.FC = () => {
             if (!prev.queue || prev.queue.length === 0) return prev; 
             const prevIdx = (prev.currentIndex - 1 + prev.queue.length) % prev.queue.length; 
             const prevSong = prev.queue[prevIdx];
-            audioService.playQueue(prev.queue, prevIdx, playingPlaylistId || undefined);
+            
+            // התיקון: משתמשים בפונקציית הדילוג המהירה
+            audioService.skipTo(prevIdx);
+            
             return { ...prev, currentIndex: prevIdx, currentSong: prevSong, isPlaying: true }; 
         }); 
-    }, [playingPlaylistId]);
+    }, []);
 
     const toggleShuffle = () => {
         setPlayerState(prev => {
