@@ -332,7 +332,7 @@ class AudioService {
         this.webQueue = items;
         this.webCurrentIndex = startIndex;
         
-        console.log(`[AudioService] Playing Queue. Size: ${items.length}, Start: ${startIndex}`);
+        console.log(`[AudioService] Playing Queue. Size: ${items.length}, Start: ${startIndex}, Context: ${contextId}`);
 
         if (this.isNative && !this.fallbackToWeb) {
             try {
@@ -340,53 +340,29 @@ class AudioService {
                     this.preloadNext(items[startIndex + 1]);
                 }
 
-                // התיקון: חזרנו לבדוק אם השיר עבר חימום ונמצא מקומית על המכשיר!
-                const mediaItems = await Promise.all(items.map(async item => {
-                    let playUrl = this.getStreamUrl(item.id);
-                    
-                    try {
-                        const fileName = `cache/${item.id}.mp3`;
-                        const stat = await Filesystem.stat({
-                            path: fileName,
-                            directory: Directory.Cache
-                        });
-                        if (stat) {
-                            const uriResult = await Filesystem.getUri({
-                                path: fileName,
-                                directory: Directory.Cache
-                            });
-                            playUrl = Capacitor.convertFileSrc(uriResult.uri);
-                            console.log(`[AudioService] Using local cache for queue item: ${playUrl}`);
-                        }
-                    } catch (e) {
-                        // הקובץ עדיין לא ב-cache, ינגן מהרשת בינתיים
-                    }
-
-                    return {
-                        id: item.id,
-                        url: playUrl,
-                        title: item.title,
-                        artist: item.author,
-                        artwork: item.thumbnail || 'https://via.placeholder.com/500',
-                        duration: typeof item.duration === 'number' ? item.duration : 0
-                    };
+                const mediaItems = items.map(item => ({
+                    id: item.id,
+                    url: this.getStreamUrl(item.id), // <--- שינוי כאן: השתמשנו בפונקציה
+                    title: item.title,
+                    artist: item.author,
+                    artwork: item.thumbnail || 'https://via.placeholder.com/500',
+                    duration: typeof item.duration === 'number' ? item.duration : 0
                 }));
                 
                 await StreamifyMedia.playQueue({
                     items: mediaItems,
                     startIndex: startIndex,
                     contextId: contextId
-                } as any);
+                } as PlayQueueOptions);
             } catch (e) {
                 console.error("Native playQueue failed", e);
             }
         } else {
-            // הבלוק של ה-Web נשאר רגיל ונקי
             this.webQueue = [...items];
             this.webCurrentIndex = startIndex;
             
             const song = items[startIndex];
-            let url = this.getStreamUrl(song.id); 
+            const url = this.getStreamUrl(song.id); // <--- שינוי כאן: השתמשנו בפונקציה
             
             this.playWeb(song, url);
             
@@ -394,45 +370,13 @@ class AudioService {
                 const nextIndex = startIndex + 1;
                 if (nextIndex < items.length) {
                     const nextSong = items[nextIndex];
-                    const nextUrl = this.getStreamUrl(nextSong.id); 
+                    const nextUrl = this.getStreamUrl(nextSong.id); // <--- שינוי כאן: השתמשנו בפונקציה
                     this.triggerServerSideWarmup(nextUrl);
                 }
             }, 3000);
         }
     }
 
-    public async skipTo(index: number) {
-        if (!this.webQueue || this.webQueue.length <= index) return;
-        
-        this.webCurrentIndex = index;
-        console.log(`[AudioService] Skipping seamlessly to index: ${index}`);
-
-        if (this.isNative && !this.fallbackToWeb) {
-            try {
-                // דילוג טבעי של ExoPlayer
-                await (StreamifyMedia as any).skipToIndex({ index });
-                
-                // מכינים (Warmup) את השיר שבא אחריו כדי שגם המעבר הבא יהיה מיידי
-                if (index + 1 < this.webQueue.length) {
-                    this.preloadNext(this.webQueue[index + 1]);
-                }
-            } catch (e) {
-                console.error("Native skip failed", e);
-            }
-        } else {
-            // בווינדוס/ווב נפעיל כרגיל
-            const song = this.webQueue[index];
-            const url = this.getStreamUrl(song.id);
-            this.playWeb(song, url);
-            
-            setTimeout(() => {
-                if (index + 1 < this.webQueue.length) {
-                    this.triggerServerSideWarmup(this.getStreamUrl(this.webQueue[index + 1].id));
-                }
-            }, 3000);
-        }
-    }
-    
     public async addToQueue(item: PlaylistItem, url: string, contextId?: string) {
         url = this.getStreamUrl(item.id);
         if (this.isNative && !this.fallbackToWeb) {

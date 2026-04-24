@@ -483,8 +483,7 @@ public class StreamifyMediaPlugin extends Plugin {
 
         JSArray items = call.getArray("items");
         Integer startIndex = call.getInt("startIndex", 0);
-        String contextId = call.getString("contextId", "");
-        Double startPos = call.getDouble("startPosition", 0.0); // קולטים את המיקום מהאפליקציה
+        String contextId = call.getString("contextId", ""); // Get queue context ID
 
         if (items == null || items.length() == 0) {
             call.reject("No items provided");
@@ -532,16 +531,7 @@ public class StreamifyMediaPlugin extends Plugin {
                     return;
                 }
 
-                long startPositionMs = (long) (startPos * 1000);
-                
-                if (startPositionMs > 0) {
-                    // אם קיבלנו זמן מהזיכרון - אנחנו אומרים לנגן להתחיל ממנו מראש!
-                    controller.setMediaItems(mediaItems, startIndex, startPositionMs);
-                } else {
-                    // התחלה רגילה מאפס
-                    controller.setMediaItems(mediaItems, startIndex, C.TIME_UNSET);
-                }
-                
+                controller.setMediaItems(mediaItems, startIndex, C.TIME_UNSET);
                 controller.prepare();
                 controller.play();
 
@@ -686,21 +676,6 @@ public class StreamifyMediaPlugin extends Plugin {
                 call.resolve(ret);
             } else {
                 call.reject("Service not connected");
-            }
-        });
-    }
-
-    @PluginMethod
-    public void skipToIndex(PluginCall call) {
-        handler.post(() -> {
-            if (controller != null) {
-                Integer index = call.getInt("index", 0);
-                // אומר לנגן לקפוץ לאינדקס הספציפי בתור הקיים שלו בלי למחוק את ה-Buffer!
-                controller.seekToDefaultPosition(index);
-                controller.play();
-                call.resolve();
-            } else {
-                call.reject("Player not initialized");
             }
         });
     }
