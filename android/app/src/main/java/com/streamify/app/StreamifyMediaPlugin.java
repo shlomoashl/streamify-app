@@ -483,7 +483,8 @@ public class StreamifyMediaPlugin extends Plugin {
 
         JSArray items = call.getArray("items");
         Integer startIndex = call.getInt("startIndex", 0);
-        String contextId = call.getString("contextId", ""); // Get queue context ID
+        String contextId = call.getString("contextId", "");
+        Double startPos = call.getDouble("startPosition", 0.0); // קולטים את המיקום מהאפליקציה
 
         if (items == null || items.length() == 0) {
             call.reject("No items provided");
@@ -531,7 +532,16 @@ public class StreamifyMediaPlugin extends Plugin {
                     return;
                 }
 
-                controller.setMediaItems(mediaItems, startIndex, C.TIME_UNSET);
+                long startPositionMs = (long) (startPos * 1000);
+                
+                if (startPositionMs > 0) {
+                    // אם קיבלנו זמן מהזיכרון - אנחנו אומרים לנגן להתחיל ממנו מראש!
+                    controller.setMediaItems(mediaItems, startIndex, startPositionMs);
+                } else {
+                    // התחלה רגילה מאפס
+                    controller.setMediaItems(mediaItems, startIndex, C.TIME_UNSET);
+                }
+                
                 controller.prepare();
                 controller.play();
 

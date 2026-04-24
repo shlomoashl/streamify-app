@@ -310,8 +310,9 @@ const App: React.FC = () => {
     const lastSavedSongIdRef = useRef<string | null>(null);
 
     useEffect(() => {
-        if (playerState.currentSong && playerState.queue && playerState.queue.length > 0) {
-            // שומרים תמיד למפתח הנכון: streamify_player_state !!
+        // שומרים את הסטייט רק אם האפליקציה מוכנה והנתונים נטענו
+        if (isAppReady && playerState.currentSong && playerState.queue && playerState.queue.length > 0) {
+            
             const stateToSave = { 
                 ...playerState, 
                 savedTime: 0, 
@@ -320,13 +321,16 @@ const App: React.FC = () => {
             delete (stateToSave as any).originalQueue;
             storageService.saveData('streamify_player_state', stateToSave);
 
-            // מאפסים שעון אם באמת עברנו שיר
-            if (lastSavedSongIdRef.current !== playerState.currentSong.id) {
+            // תיקון קריטי: מאפסים ל-0 רק אם זה באמת שיר *אחר* ממה ששמרנו קודם
+            // ורק אם זו לא הפעם הראשונה שהאפליקציה עולה
+            if (lastSavedSongIdRef.current && lastSavedSongIdRef.current !== playerState.currentSong.id) {
+                console.log("New song detected - resetting saved position to 0");
                 localStorage.setItem('last_played_position', '0');
-                lastSavedSongIdRef.current = playerState.currentSong.id;
             }
+            
+            lastSavedSongIdRef.current = playerState.currentSong.id;
         }
-    }, [playerState.currentSong?.id, playerState.currentIndex, playerState.isShuffled]);
+    }, [playerState.currentSong?.id, playerState.currentIndex, playerState.isShuffled, isAppReady]);
     // --- סוף תוספת ---
 
     const audioInitializedRef = useRef(false);
@@ -548,28 +552,20 @@ const App: React.FC = () => {
     }, [playlistViewMode]);
 
     const triggerAutoPlay = async () => {
-        if (audioInitializedRef.current) return;
-        if (!playerState.currentSong) return;
-        console.log(`Auto-play attempt...`);
+        if (audioInitializedRef.current || !playerState.currentSong) return;
+        
         try {
-            setPlayerState(prev => ({ ...prev, isPlaying: true }));
-            await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);
-            audioInitializedRef.current = true;
+            console.log(`Professional Auto-play Start...`);
             
-            // משיכת המיקום השמור
+            // קוראים את המיקום השמור
             const savedPosition = parseFloat(localStorage.getItem('last_played_position') || '0');
             
-            if (savedPosition > 3) {
-                // באנדרואיד הנגן לוקח יותר זמן להתכונן (Buffer), לכן נחכה 3 שניות לפני הדילוג
-                // בווינדוס נשאיר את זה על חצי שנייה כי זה מהיר
-                const seekDelay = Capacitor.getPlatform() === 'android' ? 3000 : 500;
-                
-                console.log(`Scheduling seek to ${savedPosition} in ${seekDelay}ms`);
-                
-                setTimeout(() => {
-                    audioService.seek(savedPosition);
-                }, seekDelay);
-            }
+            setPlayerState(prev => ({ ...prev, isPlaying: true }));
+            audioInitializedRef.current = true;
+
+            // התיקון האמיתי: אנחנו שולחים ל-AudioService את המיקום (savedPosition) מראש!
+            await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined, savedPosition);
+            
         } catch (e) {
             console.error(`Auto-play failed:`, e);
             setPlayerState(prev => ({ ...prev, isPlaying: false }));

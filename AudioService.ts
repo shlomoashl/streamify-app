@@ -326,13 +326,14 @@ class AudioService {
         }
     }
 
-    public async playQueue(items: PlaylistItem[], startIndex: number, contextId?: string) {
+    // הוספנו את startPosition לפונקציה
+    public async playQueue(items: PlaylistItem[], startIndex: number, contextId?: string, startPosition: number = 0) {
         if (!items || items.length === 0) return;
         
         this.webQueue = items;
         this.webCurrentIndex = startIndex;
         
-        console.log(`[AudioService] Playing Queue. Size: ${items.length}, Start: ${startIndex}, Context: ${contextId}`);
+        console.log(`[AudioService] Playing Queue. Size: ${items.length}, Start: ${startIndex}, Pos: ${startPosition}`);
 
         if (this.isNative && !this.fallbackToWeb) {
             try {
@@ -342,7 +343,7 @@ class AudioService {
 
                 const mediaItems = items.map(item => ({
                     id: item.id,
-                    url: this.getStreamUrl(item.id), // <--- שינוי כאן: השתמשנו בפונקציה
+                    url: this.getStreamUrl(item.id),
                     title: item.title,
                     artist: item.author,
                     artwork: item.thumbnail || 'https://via.placeholder.com/500',
@@ -352,12 +353,14 @@ class AudioService {
                 await StreamifyMedia.playQueue({
                     items: mediaItems,
                     startIndex: startIndex,
-                    contextId: contextId
-                } as PlayQueueOptions);
+                    contextId: contextId,
+                    startPosition: startPosition // שולחים את המיקום ל-Java
+                } as any);
             } catch (e) {
                 console.error("Native playQueue failed", e);
             }
         } else {
+            // ... (שאר קוד ה-Web נשאר ללא שינוי)
             this.webQueue = [...items];
             this.webCurrentIndex = startIndex;
             
