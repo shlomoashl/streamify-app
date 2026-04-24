@@ -556,13 +556,19 @@ const App: React.FC = () => {
             await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);
             audioInitializedRef.current = true;
             
-            // משיכת המיקום השמור ודילוג אליו
+            // משיכת המיקום השמור
             const savedPosition = parseFloat(localStorage.getItem('last_played_position') || '0');
+            
             if (savedPosition > 3) {
-                // נותנים לנגן חצי שנייה להתחיל לנגן לפני הדילוג החכם
+                // באנדרואיד הנגן לוקח יותר זמן להתכונן (Buffer), לכן נחכה 3 שניות לפני הדילוג
+                // בווינדוס נשאיר את זה על חצי שנייה כי זה מהיר
+                const seekDelay = Capacitor.getPlatform() === 'android' ? 3000 : 500;
+                
+                console.log(`Scheduling seek to ${savedPosition} in ${seekDelay}ms`);
+                
                 setTimeout(() => {
                     audioService.seek(savedPosition);
-                }, 500);
+                }, seekDelay);
             }
         } catch (e) {
             console.error(`Auto-play failed:`, e);
