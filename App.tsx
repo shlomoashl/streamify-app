@@ -401,6 +401,10 @@ const App: React.FC = () => {
                 if (savedPlayerState && savedPlayerState.currentSong) {
                     console.log("Restoring FULL state from JS Cache:", savedPlayerState);
                     setPlayingPlaylistId(savedPlayerState.playingPlaylistId || null);
+                    
+                    // ---- התיקון! מודיעים לשומר מראש על ה-ID, כדי שלא יאפס את הזמן בפתיחה ----
+                    lastSavedSongIdRef.current = savedPlayerState.currentSong.id;
+                    
                     setPlayerState({ 
                         ...savedPlayerState, 
                         isPlaying: false, 
@@ -447,6 +451,10 @@ const App: React.FC = () => {
                             }
                             
                             setPlayingPlaylistId(restoredPlaylistId);
+                            
+                            // ---- התיקון (גם במקרה של Native) ----
+                            lastSavedSongIdRef.current = nativeSong.id;
+
                             setPlayerState({
                                 isOpen: true,
                                 isPlaying: false,
