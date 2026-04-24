@@ -62,7 +62,7 @@ jobs:
       run: |
         chmod +x gradlew
         ./gradlew assembleRelease \
-          -Pandroid.injected.signing.storeFile=my-release-key.keystore \
+          -Pandroid.injected.signing.storeFile=$GITHUB_WORKSPACE/android/my-release-key.keystore \
           -Pandroid.injected.signing.storePassword=${{ secrets.KEYSTORE_PASSWORD }} \
           -Pandroid.injected.signing.keyAlias=${{ secrets.KEY_ALIAS }} \
           -Pandroid.injected.signing.keyPassword=${{ secrets.KEY_PASSWORD }}
@@ -74,10 +74,10 @@ jobs:
         name: streamify-app-release.apk
         path: android/app/build/outputs/apk/release/app-release.apk
 
-    # 10. יוצר Release חדש בכל פעם שעושים Push!
+    # 10. יוצר Release חדש בכל פעם שעושים Push
     - name: Create GitHub Release and Upload APK
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: latest-build # שם קבוע!
-        name: Streamify (Latest Auto-Build)
+        tag_name: build-${{ github.run_number }} # כל פוש מקבל תג חדש ונקי!
+        name: Streamify Update #${{ github.run_number }}
         files: android/app/build/outputs/apk/release/app-release.apk
