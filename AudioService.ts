@@ -365,7 +365,12 @@ class AudioService {
             this.webCurrentIndex = startIndex;
             
             const song = items[startIndex];
-            const url = this.getStreamUrl(song.id); // <--- שינוי כאן: השתמשנו בפונקציה
+            let url = this.getStreamUrl(song.id); // <--- חובה לשנות ל-let כדי להוסיף את הזמן
+            
+            // מוסיפים את דילוג הזמן לכתובת אם יש צורך
+            if (startPosition > 0) {
+                url = `${url}#t=${startPosition}`;
+            }
             
             this.playWeb(song, url);
             
