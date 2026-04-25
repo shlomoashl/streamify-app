@@ -325,10 +325,6 @@ class AudioService {
 
         if (this.isNative && !this.fallbackToWeb) {
             try {
-                if (startIndex + 1 < items.length) {
-                    this.preloadNext(items[startIndex + 1]);
-                }
-
                 const mediaItems = items.map(item => ({
                     id: item.id,
                     url: this.getStreamUrl(item.id), // <--- שינוי כאן: השתמשנו בפונקציה
@@ -381,7 +377,7 @@ class AudioService {
                 await (StreamifyMedia as any).skipToIndex({ index });
                 
                 // הוספה קטנה: חייבים לבקש להכין את השיר הבא גם באנדרואיד אחרי שדילגנו!
-                this.prepareNextSong(index + 1);
+            
             } catch (e) { console.error("Native skip failed", e); }
         } else {
             this.playWeb(song, this.getStreamUrl(song.id));
