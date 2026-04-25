@@ -34,7 +34,7 @@ public class PlaybackService extends MediaSessionService {
     public void onCreate() {
         super.onCreate();
         
-        String userAgent = "Streamify Android App";
+        String userAgent = "Streamify";
         
         DefaultHttpDataSource.Factory httpDataSourceFactory = new DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)

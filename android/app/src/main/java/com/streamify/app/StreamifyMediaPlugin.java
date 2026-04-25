@@ -130,7 +130,7 @@ public class StreamifyMediaPlugin extends Plugin {
                 playlistCon.setRequestMethod("GET");
                 
                 // תיקון קריטי: שנה מ-"Streamify" לזה שמוגדר ב-PlaybackService
-                playlistCon.setRequestProperty("User-Agent", "Streamify Android App"); 
+                playlistCon.setRequestProperty("User-Agent", "Streamify"); 
                 
                 playlistCon.setConnectTimeout(10000); 
                 playlistCon.setReadTimeout(10000);
