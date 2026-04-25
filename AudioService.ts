@@ -22,6 +22,8 @@ class AudioService {
     // Web/Windows Queue Management State
     private webQueue: PlaylistItem[] = [];
     private webCurrentIndex: number = 0;
+    private shadowAudio: HTMLAudioElement | null = null; // נגן צללים שטוען ברקע
+    private badSongIds: Set<string> = new Set(); // רשימה שחורה לשירים חסומים ביוטיוב
 
     constructor() {
         this.isNative = Capacitor.isNativePlatform();
@@ -57,34 +59,20 @@ class AudioService {
             }
         });
 
-        // לוגיקת מעבר אוטומטי לשיר הבא (עבור Web/Windows)
+
         this.webAudio.addEventListener('ended', () => {
-            console.log('[AudioService] Playback ended');
+            console.log('[AudioService] Playback ended - Moving to next');
             
             if (this.webQueue.length > 0 && this.webCurrentIndex < this.webQueue.length - 1) {
-                this.webCurrentIndex++;
-                const nextSong = this.webQueue[this.webCurrentIndex];
-                console.log(`[AudioService] Web Auto-Advance to: ${nextSong.title}`);
-                
-                // שינוי 1: שימוש ב-getStreamUrl
-                const url = this.getStreamUrl(nextSong.id);
-                this.playWeb(nextSong, url);
-                
-                this.emit('itemTransition', { id: nextSong.id });
-                
-                // הכנה מראש של השיר הבא בתור
-                setTimeout(() => {
-                    if (this.webCurrentIndex + 1 < this.webQueue.length) {
-                        const futureSong = this.webQueue[this.webCurrentIndex + 1];
-                        // שינוי 2: שימוש ב-getStreamUrl עבור ה-Warmup
-                        this.triggerServerSideWarmup(this.getStreamUrl(futureSong.id));
-                    }
-                }, 3000);
+                // משתמשים בפונקציית הדילוג שלנו! היא עושה את הכל ב-0 שניות.
+                this.skipTo(this.webCurrentIndex + 1);
+                this.emit('itemTransition', { id: this.webQueue[this.webCurrentIndex].id });
             } else {
                 this.emit('ended', {});
                 this.emit('stateChange', { isPlaying: false });
             }
         });
+
 
         this.webAudio.addEventListener('play', () => {
             console.log('[AudioService] Play started');
@@ -108,11 +96,8 @@ class AudioService {
             
             navigator.mediaSession.setActionHandler('nexttrack', () => {
                 if (this.webQueue.length > 0 && this.webCurrentIndex < this.webQueue.length - 1) {
-                    this.webCurrentIndex++;
-                    const nextSong = this.webQueue[this.webCurrentIndex];
-                    // שינוי 3: שימוש ב-getStreamUrl עבור כפתור "הבא"
-                    this.playWeb(nextSong, this.getStreamUrl(nextSong.id));
-                    this.emit('itemTransition', { id: nextSong.id });
+                    this.skipTo(this.webCurrentIndex + 1);
+                    this.emit('itemTransition', { id: this.webQueue[this.webCurrentIndex].id });
                     this.emit('remoteNext', {});
                 }
             });
@@ -205,9 +190,12 @@ class AudioService {
 
             console.log(`[AudioService] Preloading next song: ${song.title}`);
             
-            // 1. Trigger server-side warmup
-            const streamUrl = this.getStreamUrl(song.id); // <--- שינוי כאן
-            this.triggerServerSideWarmup(streamUrl);
+            // אנחנו מוצאים את האינדקס של השיר המבוקש בתוך התור שלנו
+            const songIndex = this.webQueue.findIndex(s => s.id === song.id);
+            if (songIndex !== -1) {
+                // וקוראים לפונקציית צללים החדשה עם האינדקס הזה
+                this.prepareNextSong(songIndex);
+            }
 
         } catch (error) {
             console.error("[AudioService] Preload failed:", error);
@@ -219,49 +207,46 @@ class AudioService {
      * This reduces latency when the user eventually switches to this song.
      * Optimized to barely use bandwidth.
      */
-    private async triggerServerSideWarmup(streamUrl: string) {
-        if (!streamUrl) return;
-        
+    private async prepareNextSong(index: number) {
+        if (!this.webQueue || index >= this.webQueue.length) return;
+
+        const song = this.webQueue[index];
+        const streamUrl = this.getStreamUrl(song.id);
+
+        console.log(`[AudioService] ⚙️ מכין וטוען ברקע את: ${song.title}`);
+
         try {
-            // התוספת החשובה: אם זה URL של שמע (אנדרואיד), אל תנסה לפרסס כטקסט
-            if (streamUrl.includes('/get_audio/')) {
+            const controller = new AbortController();
+            // מבקשים את השיר מהשרת כדי להפעיל אותו
+            const response = await fetch(streamUrl, { signal: controller.signal });
+
+            if (!response.ok) {
+                // אם השרת החזיר שגיאה (השיר נמחק מיוטיוב/חסום)
+                console.warn(`[AudioService] 🚨 התגלה שיר שבור/חסום מראש: ${song.title}`);
+                this.badSongIds.add(song.id); // מכניסים לרשימה השחורה
+                // קסם: מדלגים מיד להכין את השיר הבא בתור!
+                this.prepareNextSong(index + 1);
                 return;
             }
 
-            // --- מכאן והלאה הלוגיקה המקורית שלך עבור M3U8 ---
-            const response = await fetch(streamUrl);
-            if (!response.ok) return;
-            
-            const text = await response.text();
-            const lines = text.split('\n');
-            let firstSegmentUrl = '';
-            
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (trimmed && !trimmed.startsWith('#')) {
-                    firstSegmentUrl = trimmed;
-                    break;
-                }
+            // השרת ענה תקין. נבטל את הבקשה הזו אחרי 200 מילישניות 
+            // כדי לא להעמיס על האינטרנט של המשתמש.
+            setTimeout(() => controller.abort(), 200);
+
+            // כעת נטען את השיר לתוך הזיכרון (Cache) בעזרת נגן הצללים 
+            // כדי שיופעל ב-0 שניות כשיגיע תורו
+            if (!this.isNative || this.fallbackToWeb) {
+                if (!this.shadowAudio) this.shadowAudio = new Audio();
+                this.shadowAudio.src = streamUrl;
+                this.shadowAudio.preload = "auto";
+                this.shadowAudio.load(); // שואב את מטא-דאטה ותחילת השמע
             }
 
-            if (firstSegmentUrl) {
-                if (!firstSegmentUrl.startsWith('http')) {
-                    const baseUrl = SERVER_PUBLIC_URL.endsWith('/') ? SERVER_PUBLIC_URL.slice(0, -1) : SERVER_PUBLIC_URL;
-                    firstSegmentUrl = baseUrl + (firstSegmentUrl.startsWith('/') ? '' : '/') + firstSegmentUrl;
-                }
-
-                console.log(`[AudioService] Warmup: Touching segment -> ${firstSegmentUrl}`);
-
-                const controller = new AbortController();
-                fetch(firstSegmentUrl, { signal: controller.signal })
-                    .then(res => {
-                        setTimeout(() => controller.abort(), 500); 
-                    })
-                    .catch(() => { /* Ignore abort error */ });
+        } catch (e: any) {
+            if (e.name !== 'AbortError') {
+                // בשגיאת רשת זמנית, ננסה בכל זאת להכין את הבא
+                this.prepareNextSong(index + 1);
             }
-
-        } catch (e) {
-            console.warn("[AudioService] Warmup failed (non-fatal):", e);
         }
     }
 
@@ -362,34 +347,40 @@ class AudioService {
             this.playWeb(song, url);
             
             setTimeout(() => {
-                const nextIndex = startIndex + 1;
-                if (nextIndex < items.length) {
-                    const nextSong = items[nextIndex];
-                    const nextUrl = this.getStreamUrl(nextSong.id); // <--- שינוי כאן: השתמשנו בפונקציה
-                    this.triggerServerSideWarmup(nextUrl);
-                }
-            }, 3000);
+                // קורא לפונקציה החדשה שלנו שדורשת רק את האינדקס הבא
+                this.prepareNextSong(startIndex + 1);
+            }, 1000); // הורדתי את זה לשנייה אחת במקום 3, שיתחיל לחמם מהר יותר
         }
     }
 
     public async skipTo(index: number) {
         if (!this.webQueue || this.webQueue.length <= index) return;
+        
+        // --- חסר: דילוג מיידי (0 שניות) מעל שירים פגומים שזיהינו ברקע ---
+        if (this.badSongIds.has(this.webQueue[index].id)) {
+            console.log(`[AudioService] ⏩ מדלג אוטומטית על שיר פגום: ${this.webQueue[index].title}`);
+            this.skipTo(index + 1); // קופץ לבא אחריו באופן מיידי
+            return;
+        }
+
         this.webCurrentIndex = index;
+        const song = this.webQueue[index];
         
         if (this.isNative && !this.fallbackToWeb) {
             try {
-                // דילוג טבעי בתוך התור הקיים של אנדרואיד בלי למחוק את החימום
+                // דילוג טבעי בתוך התור הקיים של אנדרואיד
                 await (StreamifyMedia as any).skipToIndex({ index });
+                
+                // הוספה קטנה: חייבים לבקש להכין את השיר הבא גם באנדרואיד אחרי שדילגנו!
+                this.prepareNextSong(index + 1);
             } catch (e) { console.error("Native skip failed", e); }
         } else {
-            const song = this.webQueue[index];
             this.playWeb(song, this.getStreamUrl(song.id));
             
             setTimeout(() => {
-                if (index + 1 < this.webQueue.length) {
-                    this.triggerServerSideWarmup(this.getStreamUrl(this.webQueue[index + 1].id));
-                }
-            }, 3000);
+                // תיקון קריטי: index + 1 במקום startIndex + 1
+                this.prepareNextSong(index + 1);
+            }, 1000);
         }
     }
     
