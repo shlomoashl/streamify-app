@@ -695,6 +695,16 @@ public class StreamifyMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void warmup(PluginCall call) {
+        String url = call.getString("url");
+        if (url != null) {
+            // משתמשים בפונקציה הקיימת triggerServerSideWarmup כדי להעיר את השרת
+            triggerServerSideWarmup(url);
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
     public void skipToIndex(PluginCall call) {
         handler.post(() -> {
             if (controller != null) {

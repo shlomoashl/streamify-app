@@ -207,19 +207,28 @@ class AudioService {
      * This reduces latency when the user eventually switches to this song.
      * Optimized to barely use bandwidth.
      */
+
+// בתוך AudioService.ts
+
     private async prepareNextSong(index: number) {
         if (!this.webQueue || index >= this.webQueue.length) return;
 
         const song = this.webQueue[index];
         const streamUrl = this.getStreamUrl(song.id);
 
-        console.log(`[AudioService] ⚙️ מכין וטוען ברקע את: ${song.title}`);
+        // --- התיקון לאנדרואיד ---
+        if (this.isNative && !this.fallbackToWeb) {
+            console.log(`[AudioService] Native Warmup Triggered for: ${song.title}`);
+            // אנחנו קוראים למטודה החדשה שיצרנו ב-Java
+            StreamifyMedia.warmup({ url: streamUrl });
+            return; // עוצרים כאן, לא צריך לעשות fetch ב-Webview
+        }
 
+        // --- לוגיקת ה-Web (Windows/Browser) נשארת כפי שהייתה ---
         try {
+            console.log(`[AudioService] Web Warmup for: ${song.title}`);
             const controller = new AbortController();
-            // מבקשים את השיר מהשרת כדי להפעיל אותו
             const response = await fetch(streamUrl, { signal: controller.signal });
-
             if (!response.ok) {
                 // אם השרת החזיר שגיאה (השיר נמחק מיוטיוב/חסום)
                 console.warn(`[AudioService] 🚨 התגלה שיר שבור/חסום מראש: ${song.title}`);
