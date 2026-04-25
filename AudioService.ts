@@ -148,13 +148,6 @@ class AudioService {
                     case 'itemTransition':
                          // Native auto-play moved to next song
                          this.emit('itemTransition', { id: event.value });
-                         
-                         // Preload next song
-                         const currentId = event.value;
-                         const idx = this.webQueue.findIndex(item => item.id === currentId);
-                         if (idx !== -1 && idx + 1 < this.webQueue.length) {
-                             this.preloadNext(this.webQueue[idx + 1]);
-                         }
                          break;
                     case 'error':
                         console.error('[AudioService] Native Plugin Error:', event.value);
