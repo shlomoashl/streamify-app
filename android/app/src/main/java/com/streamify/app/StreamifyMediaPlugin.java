@@ -116,26 +116,27 @@ public class StreamifyMediaPlugin extends Plugin {
      * 2. Parses it to find the FIRST segment URL.
      * 3. Fetches a small chunk of that segment to force the stream to start flowing.
      */
+    // בתוך StreamifyMediaPlugin.java
+
     private void triggerServerSideWarmup(String m3u8Url) {
         if (m3u8Url == null || m3u8Url.isEmpty()) return;
         
         new Thread(() -> {
             HttpURLConnection playlistCon = null;
             try {
-                Log.d(TAG, "Native Prefetch (Dry Run): Pinging Server -> " + m3u8Url);
+                Log.d(TAG, "Native Prefetch: Pinging Server -> " + m3u8Url);
                 URL urlObj = new URL(m3u8Url);
                 playlistCon = (HttpURLConnection) urlObj.openConnection();
                 playlistCon.setRequestMethod("GET");
-                playlistCon.setRequestProperty("User-Agent", "Streamify"); 
+                
+                // תיקון קריטי: שנה מ-"Streamify" לזה שמוגדר ב-PlaybackService
+                playlistCon.setRequestProperty("User-Agent", "Streamify Android App"); 
+                
                 playlistCon.setConnectTimeout(10000); 
                 playlistCon.setReadTimeout(10000);
                 
-                // עצם הקריאה לשרת (ResponseCode) מעירה את ה-Python וגורמת לו להריץ את yt-dlp ולשמור ב-Cache
                 int responseCode = playlistCon.getResponseCode();
                 Log.d(TAG, "Prefetch Ping Result: " + responseCode);
-                
-                // אנחנו לא מורידים את ה-M3U8, לא מנתחים אותו, ולא מושכים את מקטע הווידאו הראשון.
-                // חסכנו רוחב פס לגמרי, והשרת מוכן לשיר הבא!
                 
             } catch (Exception e) {
                 Log.w(TAG, "Native Prefetch warning: " + e.getMessage());
