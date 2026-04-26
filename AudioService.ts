@@ -146,9 +146,17 @@ class AudioService {
                         this.emit('ended', {});
                         break;
                     case 'itemTransition':
-                         // Native auto-play moved to next song
-                         this.emit('itemTransition', { id: event.value });
-                         break;
+                        // הנגן עבר לשיר חדש
+                        this.emit('itemTransition', { id: event.value });
+                        
+                        // ברגע זה ממש, אנחנו יורים פינג לשרת שיכין את השיר הבא!
+                        const currentId = event.value;
+                        const idx = this.webQueue.findIndex(item => item.id === currentId);
+                        if (idx !== -1 && idx + 1 < this.webQueue.length) {
+                            // קוראים ישירות ל-prepareNextSong כדי להשתמש בחימום הנייטיב (Java) שבנינו
+                            this.prepareNextSong(idx + 1);
+                        }
+                        break;                        
                     case 'error':
                         console.error('[AudioService] Native Plugin Error:', event.value);
                         this.emit('error', { error: event.value });
