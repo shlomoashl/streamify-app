@@ -480,9 +480,9 @@ const App: React.FC = () => {
                             isPlaying: false, 
                             isOpen: !!savedPlayerState.currentSong 
                         });
-                        if (savedPlayerState.currentSong?.duration) {
-                            setDuration(savedPlayerState.currentSong.duration);
-                        }
+                        // if (savedPlayerState.currentSong?.duration) {
+                        //     setDuration(savedPlayerState.currentSong.duration);
+                        // }
                     }
                 }
                 
@@ -562,6 +562,13 @@ const App: React.FC = () => {
             storageService.saveData('streamify_playlist_view_mode', playlistViewMode);
         }
     }, [playlistViewMode]);
+
+    // שמירה אוטומטית של מצב הנגן לזיכרון המקומי בכל פעם שהשיר, התור או השאפל משתנים
+    useEffect(() => {
+        if (stateLoadedRef.current && playerState.currentSong) {
+            saveStateToStorage(playerState, playingPlaylistId, 0);
+        }
+    }, [playerState.currentSong?.id, playerState.currentIndex, playerState.isShuffled, playingPlaylistId]);
 
     const triggerAutoPlay = async () => {
         if (audioInitializedRef.current) return;
