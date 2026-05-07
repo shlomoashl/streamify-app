@@ -399,59 +399,56 @@ const App: React.FC = () => {
                             let originalQueueForState: PlaylistItem[] | undefined = undefined;
 
                             if (lastNative.contextId) {
-                                // Find playlist in loaded cache
+                                restoredPlaylistId = lastNative.contextId;
+                                
+                                // 1. מחפשים קודם בספרייה השמורה (עבור פלייליסטים קבועים)
                                 const playlist = savedPlaylists.find(p => p.id === lastNative.contextId);
+                                
                                 if (playlist && playlist.songs.length > 0) {
-                                    restoredPlaylistId = playlist.id;
-                                    
-                                    // 1. קודם כל לוקחים את התור הרגיל מהספרייה (כדי שיהיה מעודכן)
+                                    console.log("Restoring queue from Saved Library:", playlist.name);
                                     let baseQueue = playlist.songs;
                                     
-                                    // 2. בודקים אם יש לנו תור שמור (ובעיקר תור מקורי) ב-State הישן
                                     if (savedPlayerState && savedPlayerState.playingPlaylistId === restoredPlaylistId) {
-                                        console.log("Restoring queue context from saved state. Shuffle was:", savedIsShuffled);
-                                        
                                         if (savedIsShuffled && savedPlayerState.originalQueue && savedPlayerState.queue) {
-                                            // אם ה-Shuffle היה דלוק ויש לנו את התור המעורבב שמור, נשתמש בו
-                                            // זה קריטי כדי שהשירים לא יתערבבו מחדש בכל פתיחה של האפליקציה
                                             restoredQueue = savedPlayerState.queue;
                                             originalQueueForState = savedPlayerState.originalQueue;
                                         } else {
-                                            // אם לא היה Shuffle, או שאין מידע תקין, פשוט ניקח את התור הרגיל
                                             restoredQueue = baseQueue;
                                         }
                                     } else {
-                                        // מנגנון גיבוי: אם אין State שמור אבל ה-Shuffle הכללי מופעל
                                         restoredQueue = baseQueue;
                                         if (savedIsShuffled) {
                                             originalQueueForState = [...baseQueue];
                                             restoredQueue = shuffleArray([...baseQueue]);
                                         }
                                     }
+                                } 
+                                // 2. פתרון באג 2: אם זה חיפוש (ID שמתחיל ב-temp), משחזרים מה-JS Cache
+                                else if (savedPlayerState && savedPlayerState.queue && savedPlayerState.queue.length > 0) {
+                                    console.log("Restoring context for Search/Temp playlist from JS Cache");
+                                    restoredQueue = savedPlayerState.queue;
+                                    originalQueueForState = savedPlayerState.originalQueue;
+                                }
+                                
+                                // 3. פתרון באג 1: מציאת השיר המלא בתוך התור ששוחזר
+                                const songIndex = restoredQueue.findIndex(s => s.id === lastNative.id);
+                                if (songIndex !== -1) {
+                                    restoredIndex = songIndex;
                                     
-                                    // 3. מחפשים את השיר הנוכחי (מה-Native) בתוך התור ששחזרנו
-                                    const songIndex = restoredQueue.findIndex(s => s.id === lastNative.id);
-                                    if (songIndex !== -1) {
-                                        restoredIndex = songIndex;
-                                        
-                                        // Update song metadata from playlist to be sure we have full details
-                                        const foundSong = restoredQueue[songIndex];
-                                        nativeSong.title = foundSong.title;
-                                        nativeSong.author = foundSong.author;
-                                        nativeSong.thumbnail = foundSong.thumbnail;
-                                        nativeSong.duration = foundSong.duration;
-                                        nativeSong.addedBy = foundSong.addedBy;
-                                        
-                                        console.log(`Context restored: Playlist "${playlist.name}", Index ${songIndex}, Queue Size: ${restoredQueue.length}, Shuffled: ${savedIsShuffled}`);
-                                    } else {
-                                        // גיבוי לגיבוי: אם השיר לא נמצא בתור (אולי הפלייליסט השתנה)
-                                        console.warn("Song not found in restored playlist context. Falling back to single song queue.");
-                                        restoredQueue = [nativeSong];
-                                        originalQueueForState = undefined;
-                                        // כאן אנחנו לא יכולים לדעת באמת אם ה-Shuffle רלוונטי
-                                    }
+                                    // אנחנו לוקחים את השיר המלא מהתור ולא רק את ה-ID מה-Native
+                                    const fullSongData = restoredQueue[songIndex];
+                                    nativeSong = {
+                                        ...fullSongData,
+                                        id: lastNative.id // מוודאים שה-ID נשמר
+                                    };
+                                    
+                                    console.log(`Successfully restored full metadata for: ${nativeSong.title}`);
+                                } else {
+                                    // פולבק אם השיר לא נמצא בתור
+                                    restoredQueue = [nativeSong];
                                 }
                             }
+
                             
                             setPlayingPlaylistId(restoredPlaylistId);
                             setPlayerState({
