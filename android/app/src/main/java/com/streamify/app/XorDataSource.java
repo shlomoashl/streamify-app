@@ -16,6 +16,10 @@ public class XorDataSource implements DataSource {
     private final DataSource upstream;
     // חייב להיות בדיוק אותו מפתח הצפנה כמו בפייתון
     private static final byte XOR_KEY = 0x77;
+    
+    // נגדיר את הגודל המוצפן ל-128KB (שווה ערך ל-2 צ'אנקים של 64KB)
+    private static final long ENCRYPTED_BYTES = 131072; 
+    private long currentPosition = 0;
 
     public XorDataSource(DataSource upstream) {
         this.upstream = upstream;
@@ -28,6 +32,8 @@ public class XorDataSource implements DataSource {
 
     @Override
     public long open(DataSpec dataSpec) throws IOException {
+        // שומרים את המיקום שממנו הנגן מתחיל לבקש את המידע (חשוב מאוד לדילוגים/Seek!)
+        currentPosition = dataSpec.position;
         return upstream.open(dataSpec);
     }
 
@@ -35,9 +41,12 @@ public class XorDataSource implements DataSource {
     public int read(byte[] buffer, int offset, int length) throws IOException {
         int bytesRead = upstream.read(buffer, offset, length);
         if (bytesRead > 0) {
-            // פענוח הבייטים בזמן אמת - מהיר ויעיל
             for (int i = 0; i < bytesRead; i++) {
-                buffer[offset + i] ^= XOR_KEY;
+                // מפענחים אך ורק אם המיקום האבסולוטי של הבייט הוא בתוך ה-128KB הראשונים של השיר
+                if (currentPosition < ENCRYPTED_BYTES) {
+                    buffer[offset + i] ^= XOR_KEY;
+                }
+                currentPosition++;
             }
         }
         return bytesRead;
