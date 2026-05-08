@@ -319,7 +319,7 @@ const App: React.FC = () => {
     // AbortController for canceling previous searches
     const searchAbortController = useRef<AbortController | null>(null);
 
-    const [ytMusicFilter, setYtMusicFilter] = useState<'songs' | 'albums' | 'artists' | 'playlists' | 'podcasts'>('songs');
+    const [ytMusicFilter, setYtMusicFilter] = useState<'all' | 'songs' | 'albums' | 'artists' | 'playlists' | 'podcasts'>('all');
     
     const [playlistSearchQuery, setPlaylistSearchQuery] = useState('');
     const [playlistSearchResults, setPlaylistSearchResults] = useState<YouTubeSearchResult[]>([]);
@@ -1892,7 +1892,17 @@ const App: React.FC = () => {
                                         )}
                                     </div>
                                 </div>
-                                <div className="flex gap-2 mt-3 overflow-x-auto no-scrollbar pb-1"> {['songs', 'albums', 'playlists', 'artists', 'podcasts'].map(f => ( <button key={f} onClick={() => setYtMusicFilter(f as any)} className={`px-4 py-1 rounded-full text-xs border whitespace-nowrap transition-colors ${ytMusicFilter === f ? 'bg-white text-black border-white' : 'border-white/20 hover:border-white text-white'}`}> {filterMap[f] || f} </button> ))} </div>
+                                <div className="flex gap-2 mt-3 overflow-x-auto no-scrollbar pb-1"> 
+                                    {['all', 'songs', 'albums', 'playlists', 'artists', 'podcasts'].map(f => ( 
+                                        <button 
+                                            key={f} 
+                                            onClick={() => setYtMusicFilter(f as any)} 
+                                            className={`px-4 py-1 rounded-full text-xs border whitespace-nowrap transition-colors ${ytMusicFilter === f ? 'bg-white text-black border-white' : 'border-white/20 hover:border-white text-white'}`}
+                                        > 
+                                            {f === 'all' ? 'הכל' : (filterMap[f] || f)} 
+                                        </button> 
+                                    ))} 
+                                </div>                                
                             </div>
                             <div className="flex-1 p-4 overflow-y-auto no-scrollbar">
                                 {!searchQuery.trim() && searchHistory.length > 0 ? (
