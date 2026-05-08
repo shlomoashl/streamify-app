@@ -312,6 +312,8 @@ const App: React.FC = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<YouTubeSearchResult[]>([]);
     const [isSearching, setIsSearching] = useState(false);
+    const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
+    const [showSuggestions, setShowSuggestions] = useState(false);
     const [searchHistory, setSearchHistory] = useState<string[]>([]);
     
     // AbortController for canceling previous searches
@@ -1139,6 +1141,25 @@ const App: React.FC = () => {
         }
     };
 
+    useEffect(() => {
+        const fetchSuggestions = async () => {
+            if (!searchQuery.trim()) {
+                setSearchSuggestions([]);
+                return;
+            }
+            try {
+                const res = await fetch(`${YOUTUBE_API_BASE}/suggestions?q=${encodeURIComponent(searchQuery)}`);
+                const data = await res.json();
+                setSearchSuggestions(data || []);
+            } catch (e) {
+                console.error("Suggestions error", e);
+            }
+        };
+
+        const handler = setTimeout(fetchSuggestions, 200); // 200ms זה זמן מעולה להצעות
+        return () => clearTimeout(handler);
+    }, [searchQuery]);    
+    
     // --- Search Logic Optimized ---
     useEffect(() => { 
         // OPTIMIZATION: Cancel previous request *immediately* when typing starts
@@ -1836,7 +1857,40 @@ const App: React.FC = () => {
                         <>
                             <div className="p-4 pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4 bg-spotify-base z-20 shadow-md flex-shrink-0 border-b border-white/5">
                                 <div className="relative flex items-center gap-4">
-                                    <div className="relative flex-1"> <SearchIcon className="absolute left-3 top-3 text-gray-400" /> <input className="w-full bg-white/10 rounded-full py-3 pr-4 pl-10 text-white focus:outline-none focus:ring-1 focus:ring-spotify-primary" placeholder="חיפוש שירים, אלבומים..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /> </div>
+                                    <div className="relative flex-1"> 
+                                        <SearchIcon className="absolute left-3 top-3 text-gray-400" /> 
+                                        <input 
+                                            className="w-full bg-white/10 rounded-full py-3 pr-4 pl-10 text-white focus:outline-none focus:ring-1 focus:ring-spotify-primary" 
+                                            placeholder="חיפוש שירים, אלבומים..." 
+                                            value={searchQuery} 
+                                            onChange={e => {
+                                                setSearchQuery(e.target.value);
+                                                setShowSuggestions(true);
+                                            }} 
+                                            onFocus={() => setShowSuggestions(true)}
+                                            onBlur={() => setTimeout(() => setShowSuggestions(false), 250)}
+                                        /> 
+
+                                        {/* תפריט השלמה אוטומטית */}
+                                        {showSuggestions && searchSuggestions.length > 0 && (
+                                            <div className="absolute top-[110%] left-0 right-0 bg-[#282828] border border-white/10 rounded-xl shadow-2xl z-[100] overflow-hidden">
+                                                {searchSuggestions.map((suggestion, idx) => (
+                                                    <div
+                                                        key={idx}
+                                                        className="flex items-center gap-4 p-3 hover:bg-white/10 cursor-pointer border-b border-white/5 last:border-0"
+                                                        onClick={() => {
+                                                            setSearchQuery(suggestion);
+                                                            performSearch(suggestion, false);
+                                                            setShowSuggestions(false);
+                                                        }}
+                                                    >
+                                                        <SearchIcon className="w-4 h-4 text-gray-500" />
+                                                        <span className="text-sm font-medium text-white text-right flex-1" dir="rtl">{suggestion}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                                 <div className="flex gap-2 mt-3 overflow-x-auto no-scrollbar pb-1"> {['songs', 'albums', 'playlists', 'artists', 'podcasts'].map(f => ( <button key={f} onClick={() => setYtMusicFilter(f as any)} className={`px-4 py-1 rounded-full text-xs border whitespace-nowrap transition-colors ${ytMusicFilter === f ? 'bg-white text-black border-white' : 'border-white/20 hover:border-white text-white'}`}> {filterMap[f] || f} </button> ))} </div>
                             </div>
