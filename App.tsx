@@ -1928,37 +1928,85 @@ const App: React.FC = () => {
                                 ) : isSearching ? (
                                     <div className="text-center mt-10 opacity-50">טוען...</div>
                                 ) : (
-                                    searchResults.map((res, i) => (
-                                    <div key={res.id + i} className="flex items-center gap-3 p-2 hover:bg-white/10 rounded group">
-                                        <div onClick={() => handleResultClick(res)} className="flex-1 flex items-center gap-3 min-w-0 cursor-pointer">
-                                            <div className="w-12 h-12 bg-neutral-800 rounded flex items-center justify-center text-gray-200 flex-shrink-0">{renderSearchIcon(res.type)}</div>
-                                            <div className="min-w-0 flex-1">
-                                                <div className="font-medium truncate">{res.title}</div>
-                                                <div className="text-xs text-gray-400 truncate flex items-center">
-                                                    <span className="flex-shrink-0"> {res.type ? (filterMap[res.type + 's'] || res.type).replace(/s$/, '') : 'שיר'} </span>
-                                                    <span className="mx-1 flex-shrink-0">•</span>
-                                                    <span dir="auto" className="truncate text-right"> {res.author} </span>
-                                                    
-                                                    {/* NEW: Duration/Item Count for all types */}
-                                                    {res.duration && res.duration !== 'N/A' && res.duration !== 0 && (
-                                                        <>
-                                                            <span className="mx-1 flex-shrink-0">•</span>
-                                                            <span>{typeof res.duration === 'number' ? formatDuration(res.duration) : res.duration}</span>
-                                                        </>
-                                                    )}
-                                                    {res.itemCount && (
-                                                        <>
-                                                            <span className="mx-1 flex-shrink-0">•</span>
-                                                            <span>{res.itemCount} {['album','playlist'].includes(res.type||'') ? 'פריטים' : ''}</span>
-                                                        </>
-                                                    )}
+                                    <div className="space-y-8 pb-24">
+                                        {/* סקשן שירים - רשימה */}
+                                        {searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').length > 0 && (
+                                            <section>
+                                                <h2 className="text-lg font-bold text-white mb-3 px-2">שירים</h2>
+                                                <div className="space-y-1">
+                                                    {searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').map((res) => (
+                                                        <div key={res.id} className="flex items-center gap-3 p-2 hover:bg-white/10 rounded group cursor-pointer" onClick={() => handleResultClick(res)}>
+                                                            <div className="w-10 h-10 bg-neutral-800 rounded flex items-center justify-center text-gray-400 flex-shrink-0">
+                                                                <MusicIcon className="w-5 h-5" />
+                                                            </div>
+                                                            <div className="flex-1 min-w-0 text-right" dir="rtl">
+                                                                <div className="text-sm font-medium text-white truncate">{res.title}</div>
+                                                                <div className="text-xs text-gray-400 truncate">{res.author}</div>
+                                                            </div>
+                                                            <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} className={`p-2 ${likedSongsPlaylist?.songs.some(s => s.id === res.id) ? 'text-spotify-primary' : 'text-gray-400'}`}>
+                                                                <HeartIcon filled={likedSongsPlaylist?.songs.some(s => s.id === res.id)} />
+                                                            </button>
+                                                            <button onClick={(e) => handleAddToPlaylistClick(e, res)} className="p-2 text-gray-400"> <PlusIcon /> </button>
+                                                        </div>
+                                                    ))}
                                                 </div>
-                                            </div>
-                                        </div>
-                                        {(!res.type || res.type === 'song' || res.type === 'video') && <button onClick={() => handleToggleLike(res)} className={`p-2 ${likedSongsPlaylist?.songs.some(s => s.id === res.id) ? 'text-spotify-primary' : 'text-gray-400 hover:text-white'}`}> <HeartIcon filled={likedSongsPlaylist?.songs.some(s => s.id === res.id)} /> </button>}
-                                        <button onClick={(e) => handleAddToPlaylistClick(e, res)} className="p-2 text-gray-400 hover:text-white"> <PlusIcon /> </button>
+                                            </section>
+                                        )}
+
+                                        {/* סקשן אמנים - עיגולים */}
+                                        {searchResults.filter(r => r.type === 'artist').length > 0 && (
+                                            <section>
+                                                <h2 className="text-lg font-bold text-white mb-3 px-2">אמנים</h2>
+                                                <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2 px-2">
+                                                    {searchResults.filter(r => r.type === 'artist').map((res) => (
+                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col items-center gap-2 min-w-[90px] cursor-pointer group">
+                                                            <div className="w-20 h-20 rounded-full bg-neutral-800 flex items-center justify-center border border-white/5 group-hover:bg-neutral-700 transition-colors shadow-lg">
+                                                                <ArtistIcon className="w-10 h-10 text-gray-400" />
+                                                            </div>
+                                                            <span className="text-[11px] font-medium text-white truncate w-20 text-center">{res.title}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </section>
+                                        )}
+
+                                        {/* סקשן אלבומים ופודקאסטים - ריבועים מעוצבים */}
+                                        {searchResults.filter(r => r.type === 'album' || r.type === 'podcast').length > 0 && (
+                                            <section>
+                                                <h2 className="text-lg font-bold text-white mb-3 px-2">אלבומים ופודקאסטים</h2>
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 px-2">
+                                                    {searchResults.filter(r => r.type === 'album' || r.type === 'podcast').map((res) => (
+                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="bg-white/5 p-3 rounded-xl hover:bg-white/10 transition-colors cursor-pointer text-right" dir="rtl">
+                                                            <div className={`aspect-square mb-3 flex items-center justify-center bg-neutral-800 shadow-inner ${res.type === 'album' ? 'rounded-full border-[6px] border-neutral-700/50' : 'rounded-lg'}`}>
+                                                                {res.type === 'album' ? <AlbumIcon className="w-10 h-10 text-gray-500" /> : <PodcastIcon className="w-10 h-10 text-gray-500" />}
+                                                            </div>
+                                                            <div className="text-xs font-bold text-white truncate">{res.title}</div>
+                                                            <div className="text-[10px] text-gray-400 truncate">{res.author}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </section>
+                                        )}
+
+                                        {/* סקשן פלייליסטים - ריבועים צבעוניים */}
+                                        {searchResults.filter(r => r.type === 'playlist').length > 0 && (
+                                            <section>
+                                                <h2 className="text-lg font-bold text-white mb-3 px-2">פלייליסטים</h2>
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 px-2">
+                                                    {searchResults.filter(r => r.type === 'playlist').map((res) => (
+                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="bg-white/5 p-3 rounded-xl hover:bg-white/10 cursor-pointer text-right" dir="rtl">
+                                                            <div className="aspect-square mb-3 rounded-lg bg-gradient-to-br from-spotify-primary/20 to-black/40 flex items-center justify-center border border-white/5">
+                                                                <PlaylistIcon className="w-10 h-10 text-spotify-primary/70" />
+                                                            </div>
+                                                            <div className="text-xs font-bold text-white truncate">{res.title}</div>
+                                                            <div className="text-[10px] text-gray-400">{res.itemCount ? `${res.itemCount} שירים` : 'פלייליסט'}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </section>
+                                        )}
                                     </div>
-                                )))}                                
+                                )}                               
                             </div>
                         </>
                     )}
