@@ -1929,19 +1929,28 @@ const App: React.FC = () => {
                                     <div className="text-center mt-10 opacity-50">טוען...</div>
                                 ) : (
                                     <div className="space-y-6 pb-24 px-2">
-                                        {/* 1. שירים - תצוגת מלבנים (2 בשורה) */}
+                                        {/* 1. שירים - מלבנים (2 בשורה) + כפתורי שליטה */}
                                         {searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').length > 0 && (
                                             <section>
-                                                <h2 className="text-base font-bold text-white mb-3 px-1">שירים</h2>
+                                                <h2 className="text-sm font-bold text-white mb-3 px-1">שירים</h2>
                                                 <div className="grid grid-cols-2 gap-2">
                                                     {searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').map((res) => (
-                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex items-center gap-2 p-2 bg-white/5 hover:bg-white/10 rounded-lg group cursor-pointer transition-all border border-white/5">
-                                                            <div className="w-10 h-10 bg-neutral-800 rounded flex items-center justify-center text-gray-400 flex-shrink-0">
-                                                                <MusicIcon className="w-5 h-5" />
+                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex items-center gap-2 p-1.5 bg-white/5 hover:bg-white/10 rounded-lg group cursor-pointer transition-all border border-white/5">
+                                                            <div className="w-9 h-9 bg-neutral-800 rounded flex items-center justify-center text-gray-400 flex-shrink-0">
+                                                                <MusicIcon className="w-4 h-4" />
                                                             </div>
                                                             <div className="flex-1 min-w-0 text-right" dir="rtl">
-                                                                <div className="text-[11px] font-bold text-white truncate leading-tight">{res.title}</div>
-                                                                <div className="text-[10px] text-gray-400 truncate mt-0.5">{res.author}</div>
+                                                                <div className="text-[10px] font-bold text-white truncate leading-tight">{res.title}</div>
+                                                                <div className="text-[9px] text-gray-400 truncate">{res.author}</div>
+                                                            </div>
+                                                            {/* כפתורי לייק והוספה - קטנים ונגישים */}
+                                                            <div className="flex flex-col gap-1 items-center">
+                                                                <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} className={`p-1 ${likedSongsPlaylist?.songs.some(s => s.id === res.id) ? 'text-spotify-primary' : 'text-gray-500 hover:text-white'}`}>
+                                                                    <HeartIcon className="w-3 h-3" filled={likedSongsPlaylist?.songs.some(s => s.id === res.id)} />
+                                                                </button>
+                                                                <button onClick={(e) => handleAddToPlaylistClick(e, res)} className="p-1 text-gray-500 hover:text-white">
+                                                                    <PlusIcon className="w-3 h-3" />
+                                                                </button>
                                                             </div>
                                                         </div>
                                                     ))}
@@ -1949,63 +1958,56 @@ const App: React.FC = () => {
                                             </section>
                                         )}
 
-                                        {/* 2. אמנים - עיגולים קומפקטיים */}
+                                        {/* 2. אמנים - עיגולים קטנים */}
                                         {searchResults.filter(r => r.type === 'artist').length > 0 && (
                                             <section>
-                                                <h2 className="text-base font-bold text-white mb-3 px-1">אמנים</h2>
+                                                <h2 className="text-sm font-bold text-white mb-3 px-1">אמנים</h2>
                                                 <div className="flex gap-4 overflow-x-auto no-scrollbar pb-1 px-1">
                                                     {searchResults.filter(r => r.type === 'artist').map((res) => (
-                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col items-center gap-2 min-w-[70px] cursor-pointer group">
-                                                            <div className="w-16 h-16 rounded-full bg-neutral-800 flex items-center justify-center border border-white/10 group-hover:scale-105 transition-transform shadow-lg overflow-hidden">
-                                                                <ArtistIcon className="w-8 h-8 text-gray-500" />
+                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col items-center gap-2 min-w-[65px] cursor-pointer group">
+                                                            <div className="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center border border-white/5 group-hover:scale-105 transition-transform shadow-md overflow-hidden">
+                                                                <ArtistIcon className="w-7 h-7 text-gray-500" />
                                                             </div>
-                                                            <span className="text-[10px] font-medium text-white truncate w-16 text-center">{res.title}</span>
+                                                            <span className="text-[9px] font-medium text-white truncate w-14 text-center">{res.title}</span>
                                                         </div>
                                                     ))}
                                                 </div>
                                             </section>
                                         )}
 
-                                        {/* 3. אלבומים - עיצוב דיסק ריאליסטי */}
+                                        {/* 3. אלבומים - עיצוב דיסק קומפקטי (3 בשורה) */}
                                         {searchResults.filter(r => r.type === 'album').length > 0 && (
                                             <section>
-                                                <h2 className="text-base font-bold text-white mb-3 px-1">אלבומים</h2>
+                                                <h2 className="text-sm font-bold text-white mb-3 px-1">אלבומים</h2>
                                                 <div className="grid grid-cols-3 gap-3 px-1">
                                                     {searchResults.filter(r => r.type === 'album').map((res) => (
                                                         <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col cursor-pointer group text-right" dir="rtl">
-                                                            <div className="relative aspect-square mb-2">
-                                                                {/* ה"דיסק" שיוצא מהצד */}
-                                                                <div className="absolute inset-y-1 right-0 w-full rounded-full bg-neutral-700 border border-white/10 group-hover:translate-x-2 transition-transform duration-300 flex items-center justify-center overflow-hidden">
-                                                                     <div className="w-4 h-4 rounded-full bg-neutral-900 border border-white/20 z-10"></div>
-                                                                     <div className="absolute inset-0 opacity-20 bg-gradient-to-tr from-white to-transparent"></div>
+                                                            <div className="relative aspect-square mb-2 mx-auto w-full max-w-[90px]">
+                                                                <div className="absolute inset-y-0.5 right-0 w-full rounded-full bg-neutral-700 border border-white/5 group-hover:translate-x-1.5 transition-transform duration-300 flex items-center justify-center overflow-hidden">
+                                                                     <div className="w-3 h-3 rounded-full bg-neutral-900 border border-white/10 z-10"></div>
                                                                 </div>
-                                                                {/* עטיפת האלבום */}
-                                                                <div className="absolute inset-0 bg-neutral-800 rounded shadow-lg z-10 flex items-center justify-center border border-white/10">
-                                                                    <AlbumIcon className="w-8 h-8 text-gray-500" />
+                                                                <div className="absolute inset-0 bg-neutral-800 rounded shadow-md z-10 flex items-center justify-center border border-white/10">
+                                                                    <AlbumIcon className="w-7 h-7 text-gray-500" />
                                                                 </div>
                                                             </div>
-                                                            <div className="text-[10px] font-bold text-white truncate leading-tight">{res.title}</div>
-                                                            <div className="text-[9px] text-gray-400 truncate mt-0.5">{res.author}</div>
+                                                            <div className="text-[9px] font-bold text-white truncate leading-tight px-1">{res.title}</div>
                                                         </div>
                                                     ))}
                                                 </div>
                                             </section>
                                         )}
 
-                                        {/* 4. פלייליסטים ופודקאסטים - ריבועים קטנים (3 בשורה) */}
+                                        {/* 4. פלייליסטים ופודקאסטים - גודל זהה לדף הבית (3 בשורה) */}
                                         {(searchResults.filter(r => r.type === 'playlist' || r.type === 'podcast').length > 0) && (
                                             <section>
-                                                <h2 className="text-base font-bold text-white mb-3 px-1">פלייליסטים ופודקאסטים</h2>
+                                                <h2 className="text-sm font-bold text-white mb-3 px-1">פלייליסטים ופודקאסטים</h2>
                                                 <div className="grid grid-cols-3 gap-3 px-1">
                                                     {searchResults.filter(r => r.type === 'playlist' || r.type === 'podcast').map((res) => (
                                                         <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col cursor-pointer group text-right" dir="rtl">
-                                                            <div className={`aspect-square mb-2 rounded-lg flex items-center justify-center border border-white/5 shadow-md transition-colors ${res.type === 'playlist' ? 'bg-gradient-to-br from-spotify-primary/20 to-neutral-900' : 'bg-neutral-800'}`}>
-                                                                {res.type === 'playlist' ? <PlaylistIcon className="w-8 h-8 text-spotify-primary/60" /> : <PodcastIcon className="w-8 h-8 text-gray-500" />}
+                                                            <div className={`aspect-square mb-2 mx-auto w-full max-w-[90px] rounded flex items-center justify-center border border-white/5 shadow-md transition-all group-hover:bg-white/10 ${res.type === 'playlist' ? 'bg-white/5' : 'bg-neutral-800'}`}>
+                                                                {res.type === 'playlist' ? <PlaylistIcon className="w-7 h-7 text-gray-400" /> : <PodcastIcon className="w-7 h-7 text-gray-500" />}
                                                             </div>
-                                                            <div className="text-[10px] font-bold text-white truncate leading-tight">{res.title}</div>
-                                                            <div className="text-[9px] text-gray-400 truncate mt-0.5">
-                                                                {res.type === 'playlist' ? (res.itemCount ? `${res.itemCount} שירים` : 'פלייליסט') : res.author}
-                                                            </div>
+                                                            <div className="text-[9px] font-bold text-white truncate leading-tight px-1">{res.title}</div>
                                                         </div>
                                                     ))}
                                                 </div>
