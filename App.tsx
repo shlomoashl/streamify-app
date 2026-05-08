@@ -1928,37 +1928,62 @@ const App: React.FC = () => {
                                 ) : isSearching ? (
                                     <div className="text-center mt-10 opacity-50">טוען...</div>
                                 ) : (
-                                    <div className="space-y-10 pb-32 px-4">
-                                        {/* 1. שירים - מלבנים רחבים עם כפתורים לצד זה (2 בשורה) */}
+                                    <div className="space-y-12 pb-32 px-4">
+                                        {/* 1. שירים - מלבנים רחבים עם הדגשה ירוקה וצבע לב אדום */}
                                         {searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').length > 0 && (
                                             <section>
                                                 <h2 className="text-xl font-bold text-white mb-4 px-1">שירים</h2>
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                    {searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').map((res) => (
-                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-xl group cursor-pointer transition-all border border-white/5">
-                                                            <div className="w-12 h-12 bg-neutral-800 rounded-lg flex items-center justify-center text-gray-400 flex-shrink-0 shadow-lg">
-                                                                <MusicIcon className="w-6 h-6" />
+                                                    {searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').map((res) => {
+                                                        const isPlaying = playerState.currentSong?.id === res.id;
+                                                        const isLiked = likedSongsPlaylist?.songs.some(s => s.id === res.id);
+                                                        
+                                                        return (
+                                                            <div key={res.id} onClick={() => handleResultClick(res)} 
+                                                                className={`flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-xl group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary bg-spotify-primary/10' : 'border-white/5'}`}>
+                                                                <div className="w-12 h-12 bg-neutral-800 rounded-lg flex items-center justify-center text-gray-400 flex-shrink-0 shadow-lg relative">
+                                                                    <MusicIcon className={`w-6 h-6 ${isPlaying ? 'text-spotify-primary' : ''}`} />
+                                                                </div>
+                                                                <div className="flex-1 min-w-0 text-right" dir="rtl">
+                                                                    <div className={`text-[15px] font-bold truncate leading-tight ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
+                                                                    <div className="text-[13px] text-gray-400 truncate mt-1">{res.author}</div>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} 
+                                                                        className={`p-2 transition-all ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-500 hover:text-white'}`}>
+                                                                        <HeartIcon className="w-6 h-6" filled={isLiked} />
+                                                                    </button>
+                                                                    <button onClick={(e) => { e.stopPropagation(); handleAddToPlaylistClick(e, res); }} 
+                                                                        className="p-2 text-gray-400 hover:text-white">
+                                                                        <PlusIcon className="w-6 h-6" />
+                                                                    </button>
+                                                                </div>
                                                             </div>
-                                                            <div className="flex-1 min-w-0 text-right" dir="rtl">
-                                                                <div className="text-[14px] font-bold text-white truncate leading-tight">{res.title}</div>
-                                                                <div className="text-[12px] text-gray-400 truncate mt-1">{res.author}</div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </section>
+                                        )}
+
+                                        {/* 2. פלייליסטים - מקום שני, ריבועים גדולים (גודל ספוטיפיי) */}
+                                        {searchResults.filter(r => r.type === 'playlist').length > 0 && (
+                                            <section>
+                                                <h2 className="text-xl font-bold text-white mb-4 px-1">פלייליסטים</h2>
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 px-1">
+                                                    {searchResults.filter(r => r.type === 'playlist').map((res) => (
+                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col cursor-pointer group text-right" dir="rtl">
+                                                            <div className="aspect-square mb-4 rounded-xl flex items-center justify-center border border-white/5 shadow-2xl transition-all group-hover:bg-white/10 bg-gradient-to-br from-[#282828] to-[#121212]">
+                                                                <PlaylistIcon className="w-14 h-14 text-gray-300" />
                                                             </div>
-                                                            {/* כפתורים זה לצד זה למטה */}
-                                                            <div className="flex items-center gap-1">
-                                                                <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} className={`p-2 transition-colors ${likedSongsPlaylist?.songs.some(s => s.id === res.id) ? 'text-[#ff4b4b]' : 'text-gray-500 hover:text-white'}`}>
-                                                                    <HeartIcon className="w-5 h-5" filled={likedSongsPlaylist?.songs.some(s => s.id === res.id)} />
-                                                                </button>
-                                                                <button onClick={(e) => { e.stopPropagation(); handleAddToPlaylistClick(e, res); }} className="p-2 text-gray-500 hover:text-white transition-colors">
-                                                                    <PlusIcon className="w-5 h-5" />
-                                                                </button>
-                                                            </div>
+                                                            <div className="text-[15px] font-bold text-white line-clamp-2 leading-snug px-1 h-11">{res.title}</div>
+                                                            <div className="text-[13px] text-gray-400 truncate px-1 mt-1">פלייליסט</div>
                                                         </div>
                                                     ))}
                                                 </div>
                                             </section>
                                         )}
 
-                                        {/* 2. אמנים - עיגולים מוגדלים */}
+                                        {/* 3. אמנים - עיגולים */}
                                         {searchResults.filter(r => r.type === 'artist').length > 0 && (
                                             <section>
                                                 <h2 className="text-xl font-bold text-white mb-4 px-1">אמנים</h2>
@@ -1968,60 +1993,59 @@ const App: React.FC = () => {
                                                             <div className="w-24 h-24 rounded-full bg-neutral-800 flex items-center justify-center border border-white/10 group-hover:scale-105 transition-transform shadow-2xl overflow-hidden">
                                                                 <ArtistIcon className="w-12 h-12 text-gray-500" />
                                                             </div>
-                                                            <span className="text-[13px] font-bold text-white text-center line-clamp-2 w-24 leading-snug">{res.title}</span>
+                                                            <span className="text-[14px] font-bold text-white text-center line-clamp-2 w-24 leading-snug h-11">{res.title}</span>
                                                         </div>
                                                     ))}
                                                 </div>
                                             </section>
                                         )}
 
-                                        {/* 3. אלבומים - אפקט תקליט (דיסק עגול) */}
+                                        {/* 4. אלבומים - עיגול (דיסק) בלבד - ללא ריבוע! */}
                                         {searchResults.filter(r => r.type === 'album').length > 0 && (
                                             <section>
                                                 <h2 className="text-xl font-bold text-white mb-4 px-1">אלבומים</h2>
-                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 px-1">
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-8 px-1">
                                                     {searchResults.filter(r => r.type === 'album').map((res) => (
-                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col cursor-pointer group text-right" dir="rtl">
-                                                            <div className="relative aspect-square mb-4 mx-auto w-full">
-                                                                {/* הדיסק - עיגול מושלם בלבד שיוצא מהצד */}
-                                                                <div className="absolute inset-2 left-4 rounded-full bg-[#121212] border-2 border-[#282828] group-hover:translate-x-6 transition-transform duration-500 flex items-center justify-center shadow-2xl">
-                                                                     <div className="w-8 h-8 rounded-full bg-[#181818] border border-white/5 flex items-center justify-center">
-                                                                        <div className="w-2 h-2 rounded-full bg-black"></div>
-                                                                     </div>
-                                                                     <div className="absolute inset-0 opacity-20 bg-gradient-to-tr from-black via-transparent to-white/10"></div>
+                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col items-center cursor-pointer group text-center">
+                                                            <div className="relative w-full aspect-square mb-4 rounded-full bg-black border-4 border-[#282828] flex items-center justify-center shadow-2xl group-hover:scale-105 transition-transform duration-300 overflow-hidden">
+                                                                {/* מרכז הדיסק (החור) */}
+                                                                <div className="w-12 h-12 rounded-full border-4 border-white/5 bg-neutral-900 flex items-center justify-center z-20">
+                                                                    <div className="w-3 h-3 rounded-full bg-black"></div>
                                                                 </div>
-                                                                {/* עטיפת האלבום - ריבועית למעלה */}
-                                                                <div className="absolute inset-0 bg-neutral-800 rounded shadow-2xl z-10 flex items-center justify-center border border-white/10 overflow-hidden">
-                                                                    <AlbumIcon className="w-12 h-12 text-gray-400" />
-                                                                </div>
+                                                                {/* חריצי תקליט עדינים */}
+                                                                <div className="absolute inset-4 rounded-full border border-white/5 opacity-20"></div>
+                                                                <div className="absolute inset-8 rounded-full border border-white/5 opacity-10"></div>
+                                                                <div className="absolute inset-0 bg-gradient-to-tr from-black via-transparent to-white/10 opacity-30"></div>
+                                                                {/* אייקון אלבום קטן באמצע */}
+                                                                <AlbumIcon className="absolute w-10 h-10 text-gray-600 opacity-40 bottom-4 right-4" />
                                                             </div>
-                                                            <div className="text-[14px] font-bold text-white line-clamp-2 leading-snug px-1 mb-1 h-10">{res.title}</div>
-                                                            <div className="text-[12px] text-gray-400 truncate px-1">{res.author}</div>
+                                                            <div className="text-[15px] font-bold text-white line-clamp-2 leading-snug h-11 w-full">{res.title}</div>
+                                                            <div className="text-[13px] text-gray-400 truncate w-full">{res.author}</div>
                                                         </div>
                                                     ))}
                                                 </div>
                                             </section>
                                         )}
 
-                                        {/* 4. פלייליסטים ופודקאסטים - גודל ספוטיפיי קלאסי */}
-                                        {(searchResults.filter(r => r.type === 'playlist' || r.type === 'podcast').length > 0) && (
+                                        {/* 5. פודקאסטים - בנפרד בסוף */}
+                                        {searchResults.filter(r => r.type === 'podcast').length > 0 && (
                                             <section>
-                                                <h2 className="text-xl font-bold text-white mb-4 px-1">פלייליסטים ופודקאסטים</h2>
+                                                <h2 className="text-xl font-bold text-white mb-4 px-1">פודקאסטים</h2>
                                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-6 px-1">
-                                                    {searchResults.filter(r => r.type === 'playlist' || r.type === 'podcast').map((res) => (
+                                                    {searchResults.filter(r => r.type === 'podcast').map((res) => (
                                                         <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col cursor-pointer group text-right" dir="rtl">
-                                                            <div className={`aspect-square mb-4 rounded-xl flex items-center justify-center border border-white/5 shadow-2xl transition-all group-hover:bg-white/10 ${res.type === 'playlist' ? 'bg-gradient-to-br from-[#282828] to-[#121212]' : 'bg-[#181818]'}`}>
-                                                                {res.type === 'playlist' ? <PlaylistIcon className="w-12 h-12 text-gray-300" /> : <PodcastIcon className="w-12 h-12 text-gray-400" />}
+                                                            <div className="aspect-square mb-4 rounded-xl flex items-center justify-center border border-white/5 shadow-2xl transition-all group-hover:bg-white/10 bg-[#181818]">
+                                                                <PodcastIcon className="w-14 h-14 text-gray-400" />
                                                             </div>
-                                                            <div className="text-[14px] font-bold text-white line-clamp-2 leading-snug px-1 h-10">{res.title}</div>
-                                                            <div className="text-[12px] text-gray-400 truncate px-1 mt-1">{res.type === 'playlist' ? 'פלייליסט' : res.author}</div>
+                                                            <div className="text-[15px] font-bold text-white line-clamp-2 leading-snug px-1 h-11">{res.title}</div>
+                                                            <div className="text-[13px] text-gray-400 truncate px-1 mt-1">{res.author}</div>
                                                         </div>
                                                     ))}
                                                 </div>
                                             </section>
                                         )}
                                     </div>
-                                )}                               
+                                )}                            
                             </div>
                         </>
                     )}
