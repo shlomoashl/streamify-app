@@ -41,13 +41,15 @@ public class XorDataSource implements DataSource {
     public int read(byte[] buffer, int offset, int length) throws IOException {
         int bytesRead = upstream.read(buffer, offset, length);
         if (bytesRead > 0) {
-            for (int i = 0; i < bytesRead; i++) {
-                // מפענחים אך ורק אם המיקום האבסולוטי של הבייט הוא בתוך ה-128KB הראשונים של השיר
-                if (currentPosition < ENCRYPTED_BYTES) {
+            // מבצעים את בדיקת התנאי מחוץ ללולאה כדי לא לחנוק את המעבד
+            if (currentPosition < ENCRYPTED_BYTES) {
+                // מחשבים כמה בייטים נשארו לפענח בצ'אנק הנוכחי
+                int bytesToEncrypt = (int) Math.min(bytesRead, ENCRYPTED_BYTES - currentPosition);
+                for (int i = 0; i < bytesToEncrypt; i++) {
                     buffer[offset + i] ^= XOR_KEY;
                 }
-                currentPosition++;
             }
+            currentPosition += bytesRead;
         }
         return bytesRead;
     }

@@ -48,15 +48,12 @@ public class PlaybackService extends MediaSessionService {
         DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(this)
             .setDataSourceFactory(xorDataSourceFactory); // הנגן ימשוך נתונים רק דרך המפענח
 
-// בתוך PlaybackService.java -> onCreate
-
-        // ... (איפה שהגדרת את ה-loadControl)
         androidx.media3.exoplayer.DefaultLoadControl loadControl = new androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 30000, // מקסימום באפר (הגדלנו ל-30 שניות)
                 60000, // באפר להחזקה
-                1000,  // באפר מינימלי לניגון
-                1500   // באפר לניגון אחרי ניתוק
+                250,   // באפר מינימלי לניגון - שונה ל-250ms לזירוז הפעלה ראשונית
+                500    // באפר לניגון אחרי ניתוק - שונה ל-500ms
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build();
