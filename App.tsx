@@ -1057,6 +1057,70 @@ const App: React.FC = () => {
         }
     };
 
+    const updateMBDPlaylist = async (playlist: Playlist) => {
+        const artistName = "Mordechai Ben David";
+        // סינון השירים ששייכים לאמן המבוקש
+        const songsToFix = playlist.songs.filter(s => 
+            s.author.toLowerCase().includes(artistName.toLowerCase())
+        );
+
+        if (songsToFix.length === 0) {
+            alert(`לא נמצאו שירים של ${artistName} בפלייליסט הזה.`);
+            return;
+        }
+
+        setConfirmModal({
+            isOpen: true,
+            title: "עדכון שירים",
+            message: `נמצאו ${songsToFix.length} שירים של ${artistName}. האפליקציה תחפש להם קישורים חדשים ותעדכן אותם. להמשיך?`,
+            onConfirm: async () => {
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                setGlobalLoading(`מתחיל עדכון עבור ${artistName}...`);
+
+                let successCount = 0;
+
+                for (let i = 0; i < songsToFix.length; i++) {
+                    const oldSong = songsToFix[i];
+                    setGlobalLoading(`מעדכן: ${oldSong.title} (${i + 1}/${songsToFix.length})`);
+
+                    try {
+                        const query = encodeURIComponent(`${oldSong.title} ${artistName} audio`);
+                        const res = await fetch(`${YOUTUBE_API_BASE}?action=search_and_download_video&query=${query}&search_engine=youtubemusic_songs`);
+                        const data = await res.json();
+
+                        if (data.success && data.results && data.results.length > 0) {
+                            const bestMatch = data.results[0];
+
+                            if (bestMatch.id !== oldSong.id) {
+                                await apiRemoveSong(playlist.id, oldSong.id);
+                                
+                                const newSongItem: PlaylistItem = {
+                                    ...oldSong,
+                                    id: bestMatch.id,
+                                    thumbnail: bestMatch.thumbnail_url || oldSong.thumbnail,
+                                    addedAt: new Date().toISOString()
+                                };
+                                await apiAddSongsToPlaylist(playlist.id, [newSongItem]);
+                                successCount++;
+                            }
+                        }
+                    } catch (e) {
+                        console.error(`שגיאה בעדכון השיר ${oldSong.title}:`, e);
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 600));
+                }
+
+                setGlobalLoading(null);
+                setConfirmModal({
+                    isOpen: true,
+                    title: "העדכון הסתיים",
+                    message: `מתוך ${songsToFix.length} שירים, ${successCount} עודכנו בהצלחה.`,
+                    onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+                    isAlertOnly: true
+                });
+            }
+        });
+    };
     // --- Common Handlers ---
 
     const handleToggleLike = (songResult: YouTubeSearchResult | PlaylistItem) => {
@@ -1696,6 +1760,18 @@ const App: React.FC = () => {
                     </>
                 )}
                 <button className="w-full text-right p-2 hover:bg-white/10 rounded flex items-center gap-2" onClick={() => { isFolder ? apiDeleteFolder(item.id) : apiDeletePlaylist(item.id); closeContextMenu(); }}> <TrashIcon className="w-4 h-4" /> <span>מחק</span> </button>
+                {!isFolder && !isExternal && (item as Playlist).creator === currentUser?.email && (
+                    <button 
+                        className="w-full text-right p-2 hover:bg-white/10 rounded flex items-center gap-2 text-yellow-400" 
+                        onClick={() => { 
+                            updateMBDPlaylist(item as Playlist); 
+                            closeContextMenu(); 
+                        }}
+                    >
+                        <RefreshCcwIcon className="w-4 h-4" />
+                        <span>תקן שירים של MBD</span>
+                    </button>
+                )}                
                 {!isFolder && <button className="w-full text-right p-2 hover:bg-white/10 rounded flex items-center gap-2" onClick={() => { setMoveToFolderState({ visible: true, playlistId: item.id }); closeContextMenu(); }}> <FolderIcon className="w-4 h-4" /> <span>העבר לתיקייה</span> </button>}
             </div>
         );
