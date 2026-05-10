@@ -17,8 +17,8 @@ public class XorDataSource implements DataSource {
     // חייב להיות בדיוק אותו מפתח הצפנה כמו בפייתון
     private static final byte XOR_KEY = 0x77;
     
-    // נגדיר את הגודל המוצפן ל-128KB (שווה ערך ל-2 צ'אנקים של 64KB)
-    private static final long ENCRYPTED_BYTES = 131072; 
+    // נגדיר את הגודל המוצפן ל-64KB (שווה ערך לצ'אנק אחד)
+    private static final long ENCRYPTED_BYTES = 65536; 
     private long currentPosition = 0;
 
     public XorDataSource(DataSource upstream) {
