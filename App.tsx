@@ -1225,27 +1225,16 @@ const App: React.FC = () => {
         return () => clearTimeout(handler);
     }, [searchQuery]);    
     
-    // --- Search Logic Optimized ---
+// --- Search Logic: Only handles clearing results ---
     useEffect(() => { 
-        if (searchTimeoutRef.current) {
-            clearTimeout(searchTimeoutRef.current);
-        }
-
-        if (searchQuery.trim()) {
-            setIsSearching(true); // חיווי מיידי שהתחיל חיפוש
-            searchTimeoutRef.current = setTimeout(() => { 
-                performSearch(searchQuery, false);
-            }, 800);
-        } else { 
+        if (!searchQuery.trim()) {
             if (searchAbortController.current) {
                 searchAbortController.current.abort();
             }
             setSearchResults([]); 
             setIsSearching(false);
-        } 
-
-        return () => clearTimeout(searchTimeoutRef.current); 
-    }, [searchQuery, ytMusicFilter]);
+        }
+    }, [searchQuery]);
 
     useEffect(() => { 
         const handler = setTimeout(() => { 
@@ -1987,7 +1976,18 @@ const App: React.FC = () => {
                                             }} 
                                             onFocus={() => setShowSuggestions(true)}
                                             onBlur={() => setTimeout(() => setShowSuggestions(false), 250)}
-                                        /> 
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    setShowSuggestions(false);
+                                                    if (searchQuery.trim()) {
+                                                        performSearch(searchQuery, false);
+                                                    }
+                                                    // סגירת המקלדת באנדרואיד/אייפון
+                                                    (e.target as HTMLInputElement).blur();
+                                                }
+                                            }}
+                                        />
 
                                         {/* תפריט השלמה אוטומטית */}
                                         {showSuggestions && searchSuggestions.length > 0 && (
@@ -1997,8 +1997,10 @@ const App: React.FC = () => {
                                                         key={idx}
                                                         className="flex items-center gap-4 p-3 hover:bg-white/10 cursor-pointer border-b border-white/5 last:border-0"
                                                         onClick={() => {
-                                                            setSearchQuery(suggestion); // ה-useEffect ידאג להפעיל את החיפוש בצורה נקייה
+                                                            setSearchQuery(suggestion);
                                                             setShowSuggestions(false);
+                                                            // טריגר לחיפוש כבד מיד עם הבחירה
+                                                            performSearch(suggestion, false);
                                                         }}
                                                     >
                                                         <SearchIcon className="w-4 h-4 text-gray-500" />
