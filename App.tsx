@@ -1225,7 +1225,7 @@ const App: React.FC = () => {
         return () => clearTimeout(handler);
     }, [searchQuery]);    
     
-// --- Search Logic: Only handles clearing results ---
+    // --- Search Logic: Handles clearing results ---
     useEffect(() => { 
         if (!searchQuery.trim()) {
             if (searchAbortController.current) {
@@ -1235,6 +1235,13 @@ const App: React.FC = () => {
             setIsSearching(false);
         }
     }, [searchQuery]);
+
+    // טריגר לחיפוש אוטומטי כשמחליפים קטגוריה (פילטר), בתנאי שיש טקסט לחיפוש
+    useEffect(() => {
+        if (searchQuery.trim()) {
+            performSearch(searchQuery, false);
+        }
+    }, [ytMusicFilter]);
 
     useEffect(() => { 
         const handler = setTimeout(() => { 
