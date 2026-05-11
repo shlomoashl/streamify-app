@@ -318,6 +318,7 @@ const App: React.FC = () => {
     
     // AbortController for canceling previous searches
     const searchAbortController = useRef<AbortController | null>(null);
+    const searchTimeoutRef = useRef<any>(null);
 
     const [ytMusicFilter, setYtMusicFilter] = useState<'all' | 'songs' | 'albums' | 'artists' | 'playlists' | 'podcasts'>('all');
     
@@ -1226,25 +1227,34 @@ const App: React.FC = () => {
     
     // --- Search Logic Optimized ---
     useEffect(() => { 
-        // OPTIMIZATION: Cancel previous request *immediately* when typing starts
-        if (searchAbortController.current) {
-            searchAbortController.current.abort();
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
         }
 
-        const handler = setTimeout(() => { 
-            if (searchQuery.trim()) {
+        if (searchQuery.trim()) {
+            setIsSearching(true); // חיווי מיידי שהתחיל חיפוש
+            searchTimeoutRef.current = setTimeout(() => { 
                 performSearch(searchQuery, false);
-            } else { 
-                setSearchResults([]); 
-                setIsSearching(false);
-            } 
-        }, 800); // OPTIMIZATION: Increased debounce from 500 to 800
+            }, 800);
+        } else { 
+            if (searchAbortController.current) {
+                searchAbortController.current.abort();
+            }
+            setSearchResults([]); 
+            setIsSearching(false);
+        } 
 
-        return () => clearTimeout(handler); 
+        return () => clearTimeout(searchTimeoutRef.current); 
     }, [searchQuery, ytMusicFilter]);
 
-    useEffect(() => { const handler = setTimeout(() => { if (playlistSearchQuery.trim()) performSearch(playlistSearchQuery, true); else setPlaylistSearchResults([]); }, 500); return () => clearTimeout(handler); }, [playlistSearchQuery]);
-    
+    useEffect(() => { 
+        const handler = setTimeout(() => { 
+            if (playlistSearchQuery.trim()) performSearch(playlistSearchQuery, true); 
+            else setPlaylistSearchResults([]); 
+        }, 500); 
+        return () => clearTimeout(handler); 
+    }, [playlistSearchQuery]);
+
     const performSearch = async (term: string, isPlaylistContext: boolean) => {
         const spotifyMatch = term.match(/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)/); 
         if (spotifyMatch && !isPlaylistContext) { handleSpotifyImport(spotifyMatch[1]); return; }
@@ -1253,14 +1263,15 @@ const App: React.FC = () => {
         const setResults = isPlaylistContext ? setPlaylistSearchResults : setSearchResults;
         setLoading(true);
 
+        let currentSignal: AbortSignal | undefined;
+
         if (!isPlaylistContext) {
-            // Save search history on execution
             addToSearchHistory(term);
-            
             if (searchAbortController.current) {
                 searchAbortController.current.abort();
             }
             searchAbortController.current = new AbortController();
+            currentSignal = searchAbortController.current.signal;
         }
 
         try {
@@ -1268,26 +1279,23 @@ const App: React.FC = () => {
             const params = new URLSearchParams({ action: 'search_and_download_video', query: term, search_engine: searchEngine });
             
             const res = await fetch(`${YOUTUBE_API_BASE}?${params.toString()}`, {
-                signal: !isPlaylistContext ? searchAbortController.current?.signal : undefined
+                signal: currentSignal
             }); 
             
             const data: YouTubeDownloadResponse = await res.json();
+            
+            // מניעת עדכון UI אם הבקשה בוטלה עקב חיפוש חדש
+            if (currentSignal?.aborted) return;
+
             const finalResults = data.success && data.results ? data.results : [];
             setResults(finalResults);
         } catch (e: any) { 
-            if (e.name !== 'AbortError') {
-                setResults([]); 
-            } else {
-                // Aborted, do nothing (keep loading state if a new request took over, or handled by next effect)
-                return;
-            }
+            if (currentSignal?.aborted || e.name === 'AbortError') return;
+            setResults([]); 
         } finally { 
-            if (isPlaylistContext) {
-                setLoading(false);
-            } else {
-                 if (searchAbortController.current && !searchAbortController.current.signal.aborted) {
-                     setLoading(false); 
-                 }
+            // מכבה את הטעינה אך ורק אם מדובר בבקשה העדכנית ביותר שלא בוטלה
+            if (!currentSignal?.aborted) {
+                setLoading(false); 
             }
         }
     };
@@ -1989,8 +1997,7 @@ const App: React.FC = () => {
                                                         key={idx}
                                                         className="flex items-center gap-4 p-3 hover:bg-white/10 cursor-pointer border-b border-white/5 last:border-0"
                                                         onClick={() => {
-                                                            setSearchQuery(suggestion);
-                                                            performSearch(suggestion, false);
+                                                            setSearchQuery(suggestion); // ה-useEffect ידאג להפעיל את החיפוש בצורה נקייה
                                                             setShowSuggestions(false);
                                                         }}
                                                     >
@@ -2023,7 +2030,7 @@ const App: React.FC = () => {
                                         </div>
                                         <div className="space-y-1">
                                             {searchHistory.map((term, i) => (
-                                                <div key={i} className="flex items-center justify-between p-3 rounded-lg hover:bg-white/10 group cursor-pointer" onClick={() => { setSearchQuery(term); performSearch(term, false); }}>
+                                                <div key={i} className="flex items-center justify-between p-3 rounded-lg hover:bg-white/10 group cursor-pointer" onClick={() => { setSearchQuery(term); }}>
                                                     <div className="flex items-center gap-4 min-w-0">
                                                         <div className="text-gray-400"><ClockIcon className="w-5 h-5"/></div>
                                                         <span className="truncate">{term}</span>
