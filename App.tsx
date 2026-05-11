@@ -1553,19 +1553,53 @@ const App: React.FC = () => {
     };
 
     const handleResultClick = async (result: YouTubeSearchResult) => {
-        // Feature: Add to History when result is clicked (Redundant if saved on search, but keeps history robust)
         addToSearchHistory(searchQuery);
 
-        if (!result.type || result.type === 'song' || result.type === 'video') { const songQueue = searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').map(r => searchResultToPlaylistItem(r, 'search')); const clickedSongIndex = songQueue.findIndex(s => s.id === result.id); if (clickedSongIndex !== -1) handlePlaySong(songQueue[clickedSongIndex], songQueue, clickedSongIndex, false); return; }
+        // 1. טיפול בשירים וסרטונים - נשאר אותו דבר
+        if (!result.type || result.type === 'song' || result.type === 'video') { 
+            const songQueue = searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').map(r => searchResultToPlaylistItem(r, 'search')); 
+            const clickedSongIndex = songQueue.findIndex(s => s.id === result.id); 
+            if (clickedSongIndex !== -1) handlePlaySong(songQueue[clickedSongIndex], songQueue, clickedSongIndex, false); 
+            return; 
+        }
+
         if (result.type === 'spotify_playlist') { handleSpotifyImport(result.id); return; }
         
-        // Handle generic container click (album/playlist/artist)
-        setIsSearching(true); setGlobalLoading("טוען...");
+        // 2. טיפול במיכלים (אמן, אלבום, פלייליסט, ערוץ)
+        setIsSearching(true); 
+        setGlobalLoading("טוען...");
+        
         try { 
-            const res = await fetch(`${YOUTUBE_API_BASE}/ytmusic-browse/${result.id}?type=${result.type}`); const data = await res.json();
-            if (data.success && data.results) { const tracks: PlaylistItem[] = data.results.map((r: any) => searchResultToPlaylistItem(r, 'temp')); const tempPlaylist: Playlist = { id: `temp-${result.id}`, name: result.title, creator: result.author || '', isPublic: false, songs: tracks }; setSelectedPlaylist(tempPlaylist); setActiveTab('playlist'); } 
-        } catch { setConfirmModal({ isOpen: true, title: "שגיאה", message: "שגיאה בטעינת התוכן", onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true }); }
-        finally { setIsSearching(false); setGlobalLoading(null); }
+            // תיקון סוג עבור ערוצים שמגיעים מהשרת כ-'channel'
+            const browseType = result.type === 'channel' ? 'artist' : result.type;
+            
+            // בנייה בטוחה של ה-URL (לוודא שאין כפל של youtube-api)
+            const cleanBase = YOUTUBE_API_BASE.replace(/\/$/, "");
+            const finalUrl = `${cleanBase}/ytmusic-browse/${result.id}?type=${browseType}`;
+
+            const res = await fetch(finalUrl); 
+            const data = await res.json();
+
+            if (data.success && data.results) { 
+                const tracks: PlaylistItem[] = data.results.map((r: any) => searchResultToPlaylistItem(r, 'temp')); 
+                const tempPlaylist: Playlist = { 
+                    id: `temp-${result.id}`, 
+                    name: result.title, 
+                    creator: result.author || '', 
+                    isPublic: false, 
+                    songs: tracks 
+                }; 
+                setSelectedPlaylist(tempPlaylist); 
+                setActiveTab('playlist'); 
+            } else {
+                throw new Error("No results from server");
+            }
+        } catch (err) { 
+            setConfirmModal({ isOpen: true, title: "שגיאה", message: "שגיאה בטעינת תוכן האמן", onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true }); 
+        } finally { 
+            setIsSearching(false); 
+            setGlobalLoading(null); 
+        }
     };
     
     // Check if we need to load external content when opening a playlist
