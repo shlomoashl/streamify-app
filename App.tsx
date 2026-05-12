@@ -2216,18 +2216,22 @@ const App: React.FC = () => {
                                                             >
                                                                 <div className={`w-32 h-32 mb-6 flex items-center justify-center relative
                                                                     ${topType === 'artist' ? 'rounded-full border-2 border-white/5 shadow-2xl bg-[#282828]' : ''}
-                                                                    ${topType === 'album' ? 'rounded-full border-[8px] border-[#181818] shadow-2xl bg-gradient-to-br from-[#383838] to-[#1e1e1e]' : ''}
+                                                                    ${topType === 'album' ? 'rounded-full border-[2px] border-[#555] shadow-2xl bg-gradient-to-tr from-[#222] via-[#333] to-[#222]' : ''}
                                                                     ${topType === 'podcast' ? 'rounded-2xl shadow-xl bg-[#222222]' : ''}
                                                                     ${topType === 'playlist' || topType === 'spotify_playlist' ? 'rounded-xl shadow-xl bg-[#282828]' : ''}
                                                                     ${topType === 'song' || topType === 'video' ? 'rounded-xl shadow-xl bg-[#282828] overflow-hidden' : ''}
                                                                 `}>
                                                                     {topType === 'artist' && <ArtistIcon className="w-16 h-16 text-gray-500" />}
+                                                                    
+                                                                    {/* עיצוב דיסק נקי ללא SVG */}
                                                                     {topType === 'album' && (
-                                                                        <>
-                                                                            <AlbumIcon className="w-10 h-10 text-white/10 absolute top-6" />
-                                                                            <div className="w-8 h-8 bg-[#181818] rounded-full shadow-inner border border-black/50 z-0"></div>
-                                                                        </>
+                                                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                                            <div className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center bg-[#111] shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+                                                                                <div className="w-4 h-4 bg-[#181818] rounded-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.8)]"></div>
+                                                                            </div>
+                                                                        </div>
                                                                     )}
+
                                                                     {topType === 'podcast' && <PodcastIcon className="w-16 h-16 text-gray-500" />}
                                                                     {(topType === 'playlist' || topType === 'spotify_playlist') && <PlaylistIcon className="w-16 h-16 text-gray-500" />}
                                                                     {(topType === 'song' || topType === 'video') && (
@@ -2372,19 +2376,21 @@ const App: React.FC = () => {
                                                                     
                                                                     <div className={`relative w-full aspect-square mb-4 flex items-center justify-center
                                                                         ${type === 'artist' ? 'rounded-full border-2 border-white/5 shadow-xl bg-[#282828]' : ''}
-                                                                        ${type === 'album' ? 'rounded-full border-[6px] md:border-[8px] border-[#181818] shadow-2xl bg-gradient-to-br from-[#383838] to-[#1e1e1e]' : ''}
+                                                                        ${type === 'album' ? 'rounded-full border-[2px] border-[#555] shadow-2xl bg-gradient-to-tr from-[#222] via-[#333] to-[#222]' : ''}
                                                                         ${type === 'podcast' ? 'rounded-2xl shadow-lg bg-[#222222]' : ''}
                                                                         ${type === 'playlist' || type === 'spotify_playlist' ? 'rounded-xl shadow-lg bg-[#282828]' : ''}
                                                                     `}>
-                                                                        {/* החלפת התמונות באייקונים מרכזיים ויפים */}
                                                                         {type === 'artist' && <ArtistIcon className="w-1/2 h-1/2 text-gray-500" />}
+                                                                        
+                                                                        {/* עיצוב דיסק נקי ללא SVG */}
                                                                         {type === 'album' && (
-                                                                            <>
-                                                                                <AlbumIcon className="w-1/3 h-1/3 text-white/10 absolute top-1/4" />
-                                                                                {/* החור של הדיסק באמצע */}
-                                                                                <div className="w-1/4 h-1/4 bg-[#181818] rounded-full shadow-inner border border-black/50 z-0"></div>
-                                                                            </>
+                                                                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                                                <div className="w-[35%] h-[35%] rounded-full border border-white/20 flex items-center justify-center bg-[#111] shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+                                                                                    <div className="w-[30%] h-[30%] bg-[#181818] rounded-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.8)]"></div>
+                                                                                </div>
+                                                                            </div>
                                                                         )}
+
                                                                         {type === 'podcast' && <PodcastIcon className="w-1/2 h-1/2 text-gray-500" />}
                                                                         {(type === 'playlist' || type === 'spotify_playlist') && <PlaylistIcon className="w-1/2 h-1/2 text-gray-500" />}
                                                                         
