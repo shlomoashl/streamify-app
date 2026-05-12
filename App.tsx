@@ -13,7 +13,7 @@ import {
     HomeIcon, SearchIcon, LibraryIcon, PlusIcon, PlayIcon, PauseIcon, MusicIcon, 
     ShuffleIcon, LogOutIcon, SpotifyIcon, AlbumIcon, ArtistIcon, PlaylistIcon,
     HeartIcon, FolderIcon, FolderPlusIcon, ChevronDownIcon, ChevronLeftIcon,
-    TerminalIcon, PodcastIcon, GridIcon, ListIcon, LoaderIcon, ShareIcon, UsersIcon, TrashIcon, XIcon, EditIcon, ClockIcon, RefreshCcwIcon
+    TerminalIcon, PodcastIcon, GridIcon, ListIcon, LoaderIcon, ShareIcon, UsersIcon, TrashIcon, XIcon, EditIcon, ClockIcon, RefreshCcwIcon, MicIcon
 } from './components/Icons';
 import Player from './components/Player';
 import TitleBar from './components/TitleBar';
@@ -236,6 +236,7 @@ const App: React.FC = () => {
     const [globalLoading, setGlobalLoading] = useState<string | null>(null);
     const [isAppReady, setIsAppReady] = useState(false); // To prevent UI flashing before async load
     const wasPlayingRef = useRef(false); // Track playback state across network/app interruptions
+    const [isListening, setIsListening] = useState(false);
 
     const [confirmModal, setConfirmModal] = useState<{
         isOpen: boolean;
@@ -1343,6 +1344,49 @@ const App: React.FC = () => {
         return () => clearTimeout(handler); 
     }, [playlistSearchQuery]);
 
+    const handleVoiceSearch = () => {
+        // משיכת המנוע של גוגל מהדפדפן
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+        if (!SpeechRecognition) {
+            alert("חיפוש קולי לא נתמך במכשיר זה.");
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'he-IL'; // מוגדר לעברית
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = () => {
+            setIsListening(true);
+        };
+
+        recognition.onresult = (event: any) => {
+            const transcript = event.results[0][0].transcript;
+            setSearchQuery(transcript); // מכניס את מה שאמרנו לתיבת הטקסט
+            performSearch(transcript, false); // מפעיל את החיפוש מיד!
+        };
+
+        recognition.onerror = (event: any) => {
+            console.error("Voice search error:", event.error);
+            setIsListening(false);
+            if (event.error === 'not-allowed') {
+                alert("יש לאשר גישה למיקרופון בהגדרות כדי להשתמש בחיפוש קולי.");
+            }
+        };
+
+        recognition.onend = () => {
+            setIsListening(false);
+        };
+
+        try {
+            recognition.start();
+        } catch (e) {
+            console.error("Failed to start speech recognition", e);
+        }
+    };  
+
     const performSearch = async (term: string, isPlaylistContext: boolean) => {
         const spotifyMatch = term.match(/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)/); 
         if (spotifyMatch && !isPlaylistContext) { handleSpotifyImport(spotifyMatch[1]); return; }
@@ -2114,7 +2158,7 @@ const App: React.FC = () => {
                                     <div className="relative flex-1"> 
                                         <SearchIcon className="absolute left-3 top-3 text-gray-400" /> 
                                         <input 
-                                            className="w-full bg-white/10 rounded-full py-3 pr-4 pl-10 text-white focus:outline-none focus:ring-1 focus:ring-spotify-primary" 
+                                            className="w-full bg-white/10 rounded-full py-3 pr-12 pl-10 text-white focus:outline-none focus:ring-1 focus:ring-spotify-primary" 
                                             placeholder="חיפוש שירים, אלבומים..." 
                                             value={searchQuery} 
                                             onChange={e => {
@@ -2130,11 +2174,20 @@ const App: React.FC = () => {
                                                     if (searchQuery.trim()) {
                                                         performSearch(searchQuery, false);
                                                     }
-                                                    // סגירת המקלדת באנדרואיד/אייפון
                                                     (e.target as HTMLInputElement).blur();
                                                 }
                                             }}
                                         />
+
+                                        {/* כפתור חיפוש קולי */}
+                                        <button 
+                                            onClick={handleVoiceSearch}
+                                            className={`absolute right-2 top-1.5 p-1.5 rounded-full transition-all duration-300 z-10
+                                                ${isListening ? 'bg-red-500/20 text-red-500 animate-pulse scale-110' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+                                            title="חיפוש קולי"
+                                        >
+                                            <MicIcon className="w-6 h-6" />
+                                        </button>
 
                                         {/* תפריט השלמה אוטומטית */}
                                         {showSuggestions && searchSuggestions.length > 0 && (

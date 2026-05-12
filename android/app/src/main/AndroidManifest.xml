@@ -29,7 +29,6 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Media Session Service - This makes it a "Real" Music App -->
         <service
             android:name=".PlaybackService"
             android:foregroundServiceType="mediaPlayback"
@@ -42,7 +41,6 @@
             </intent-filter>
         </service>
 
-        <!-- Background Mode Service (Keep existing for general background tasks if needed) -->
         <service
             android:name="de.appplant.cordova.plugin.background.ForegroundService"
             android:foregroundServiceType="mediaPlayback"
@@ -50,8 +48,6 @@
             android:stopWithTask="false"
         />
     </application>
-
-    <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -61,4 +57,6 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 </manifest>
