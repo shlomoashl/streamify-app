@@ -2179,12 +2179,16 @@ const App: React.FC = () => {
                                         </div>
                                         <div className="space-y-1">
                                             {searchHistory.map((term, i) => (
-                                                <div key={i} className="flex items-center justify-between p-3 rounded-lg hover:bg-white/10 group cursor-pointer" onClick={() => { setSearchQuery(term); }}>
+                                                <div key={i} className="flex items-center justify-between p-3 rounded-lg hover:bg-white/10 group cursor-pointer" 
+                                                    onClick={() => { 
+                                                        setSearchQuery(term); 
+                                                        performSearch(term, false); // <-- הוספנו את טריגר החיפוש
+                                                    }}>
                                                     <div className="flex items-center gap-4 min-w-0">
                                                         <div className="text-gray-400"><ClockIcon className="w-5 h-5"/></div>
                                                         <span className="truncate">{term}</span>
                                                     </div>
-                                                    <button onClick={(e) => { e.stopPropagation(); removeSearchHistoryItem(term); }} className="text-gray-400 hover:text-white p-2">
+                                                    <button onClick={(e) => { e.stopPropagation(); removeSearchHistoryItem(term); }} className="text-gray-400 hover:text-white p-2 z-10">
                                                         <XIcon className="w-4 h-4"/>
                                                     </button>
                                                 </div>
