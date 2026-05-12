@@ -344,7 +344,99 @@ const App: React.FC = () => {
     
     const spotifyWsRef = useRef<WebSocket | null>(null);
     const autoPlayStartedRef = useRef(false);
+    // ==========================================
+    // מנהל כפתור החזור המרכזי (Android / Multimedia)
+    // ==========================================
+    
+    // 1. אוגר את כל המצבים הנוכחיים באפליקציה כדי שהמאזין יקבל את המידע העדכני ביותר
+    const appStateRef = useRef({
+        confirmModalOpen: confirmModal.isOpen,
+        inputModalOpen: inputModal.isOpen,
+        bulkImportOpen: bulkImportState.isOpen,
+        manageUsersOpen: manageUsersState.isOpen,
+        playlistSelectorOpen: showPlaylistSelector,
+        moveToFolderOpen: moveToFolderState.visible,
+        contextMenuOpen: !!contextMenu,
+        showLogs: showLogs,
+        playerExpanded: playerState.isExpanded,
+        activeTab: activeTab,
+        selectedPlaylist: selectedPlaylist
+    });
 
+    // 2. מעדכן את האוגר בכל פעם שמשהו משתנה במסך
+    useEffect(() => {
+        appStateRef.current = {
+            confirmModalOpen: confirmModal.isOpen,
+            inputModalOpen: inputModal.isOpen,
+            bulkImportOpen: bulkImportState.isOpen,
+            manageUsersOpen: manageUsersState.isOpen,
+            playlistSelectorOpen: showPlaylistSelector,
+            moveToFolderOpen: moveToFolderState.visible,
+            contextMenuOpen: !!contextMenu,
+            showLogs: showLogs,
+            playerExpanded: playerState.isExpanded,
+            activeTab: activeTab,
+            selectedPlaylist: selectedPlaylist
+        };
+    }, [
+        confirmModal.isOpen, inputModal.isOpen, bulkImportState.isOpen, manageUsersState.isOpen, 
+        showPlaylistSelector, moveToFolderState.visible, contextMenu, showLogs, 
+        playerState.isExpanded, activeTab, selectedPlaylist
+    ]);
+
+    // 3. המאזין עצמו לכפתור החזור הפיזי
+    useEffect(() => {
+        if (!Capacitor.isNativePlatform()) return;
+
+        const handleBackButton = () => {
+            const state = appStateRef.current;
+
+            // עדיפות 1: סגירת מודלים וחלונות קופצים
+            if (state.confirmModalOpen) { setConfirmModal(prev => ({...prev, isOpen: false})); return; }
+            if (state.inputModalOpen) { setInputModal(prev => ({...prev, isOpen: false})); return; }
+            if (state.bulkImportOpen) { setBulkImportState(prev => ({...prev, isOpen: false})); return; }
+            if (state.manageUsersOpen) { setManageUsersState({isOpen: false, playlist: null}); return; }
+            if (state.playlistSelectorOpen) { setShowPlaylistSelector(false); return; }
+            if (state.moveToFolderOpen) { setMoveToFolderState({visible: false, playlistId: null}); return; }
+
+            // עדיפות 2: סגירת תפריטים ולוגים
+            if (state.contextMenuOpen) { setContextMenu(null); return; }
+            if (state.showLogs) { setShowLogs(false); return; }
+
+            // עדיפות 3: מזעור הנגן אם הוא פתוח על מסך מלא
+            if (state.playerExpanded) { setPlayerState(prev => ({...prev, isExpanded: false})); return; }
+
+            // עדיפות 4: ניווט טאבים (דפים)
+            if (state.activeTab === 'playlist') {
+                if (state.selectedPlaylist?.id.startsWith('temp-')) {
+                    // אם זה פלייליסט זמני מהחיפוש, נחזור לחיפוש
+                    setActiveTab('search');
+                } else {
+                    // אחרת, נחזור לדף הבית
+                    setActiveTab('home');
+                }
+                return;
+            }
+            
+            if (state.activeTab === 'search' || state.activeTab === 'library') {
+                setActiveTab('home');
+                return;
+            }
+
+            // עדיפות 5: יציאה מהאפליקציה (אם אנחנו בדף הבית ושום דבר אחר לא פתוח)
+            if (state.activeTab === 'home') {
+                CapacitorApp.exitApp();
+            }
+        };
+
+        // רישום המאזין
+        const listenerPromise = CapacitorApp.addListener('backButton', handleBackButton);
+
+        // ניקוי המאזין בסגירה כדי למנוע דליפות זיכרון
+        return () => {
+            listenerPromise.then(listener => listener.remove());
+        };
+    }, []);
     // --- LOAD INITIAL DATA (ASYNC) ---
     useEffect(() => {
         const initApp = async () => {
@@ -1575,7 +1667,7 @@ const App: React.FC = () => {
         
         try { 
             // תיקון סוג עבור ערוצים שמגיעים מהשרת כ-'channel'
-            const browseType = result.type === 'channel' ? 'artist' : result.type;
+            const browseType = result.type;
             
             // בנייה בטוחה של ה-URL (לוודא שאין כפל של youtube-api)
             const cleanBase = YOUTUBE_API_BASE.replace(/\/$/, "");
@@ -2055,43 +2147,140 @@ const App: React.FC = () => {
                                     <div className="text-center mt-10 opacity-50">טוען...</div>
                                 ) : (
                                     <div className="space-y-12 pb-32 px-4">
-                                        {/* 1. שירים - מלבנים רחבים עם הדגשה ירוקה וצבע לב אדום */}
-                                        {searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').length > 0 && (
+                                        
+                                        {/* --- חדש: התוצאה המובילה (Top Result) - מופיע רק בטאב 'הכל' --- */}
+                                        {ytMusicFilter === 'all' && searchResults.length > 0 && (
                                             <section>
-                                                <h2 className="text-xl font-bold text-white mb-4 px-1">שירים</h2>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                    {searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').map((res) => {
-                                                        const isPlaying = playerState.currentSong?.id === res.id;
-                                                        const isLiked = likedSongsPlaylist?.songs.some(s => s.id === res.id);
+                                                <div className="grid grid-cols-1 md:grid-cols-5 gap-6" dir="rtl">
+                                                    
+                                                    {/* קופסת התוצאה המובילה (ימין) */}
+                                                    {(() => {
+                                                        const topResult = searchResults[0];
+                                                        const isArtist = topResult.type === 'artist';
+                                                        const isPlaying = playerState.currentSong?.id === topResult.id;
                                                         
                                                         return (
-                                                            <div key={res.id} onClick={() => handleResultClick(res)} 
-                                                                className={`flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-xl group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary bg-spotify-primary/10' : 'border-white/5'}`}>
-                                                                <div className="w-12 h-12 bg-neutral-800 rounded-lg flex items-center justify-center text-gray-400 flex-shrink-0 shadow-lg relative">
-                                                                    <MusicIcon className={`w-6 h-6 ${isPlaying ? 'text-spotify-primary' : ''}`} />
+                                                            <div 
+                                                                onClick={() => handleResultClick(topResult)}
+                                                                className="md:col-span-2 bg-gradient-to-b from-white/10 to-white/5 hover:bg-white/10 p-6 rounded-2xl cursor-pointer transition-all group relative flex flex-col justify-end min-h-[240px] border border-white/5"
+                                                            >
+                                                                <div className={`w-28 h-28 mb-6 shadow-2xl ${isArtist ? 'rounded-full' : 'rounded-xl'} bg-neutral-800 flex items-center justify-center overflow-hidden`}>
+                                                                    {topResult.thumbnail_url ? (
+                                                                        <img src={topResult.thumbnail_url} className="w-full h-full object-cover" />
+                                                                    ) : (
+                                                                        renderSearchIcon(topResult.type)
+                                                                    )}
                                                                 </div>
-                                                                <div className="flex-1 min-w-0 text-right" dir="rtl">
-                                                                    <div className={`text-[15px] font-bold truncate leading-tight ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
-                                                                    <div className="text-[13px] text-gray-400 truncate mt-1">{res.author}</div>
+                                                                <h3 className={`text-3xl font-bold truncate mb-2 ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>
+                                                                    {topResult.title}
+                                                                </h3>
+                                                                <div className="flex items-center gap-3 text-sm text-gray-400">
+                                                                    {topResult.type !== 'artist' && <span className="truncate">{topResult.author || topResult.channel}</span>}
+                                                                    <span className="bg-black/40 px-3 py-1 rounded-full text-[11px] font-bold uppercase text-white tracking-wide">
+                                                                        {topResult.type === 'artist' ? 'אמן' : topResult.type === 'playlist' ? 'פלייליסט' : topResult.type === 'album' ? 'אלבום' : 'שיר'}
+                                                                    </span>
                                                                 </div>
-                                                                <div className="flex items-center gap-2">
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} 
-                                                                        className={`p-2 transition-all ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-500 hover:text-white'}`}>
-                                                                        <HeartIcon className="w-6 h-6" filled={isLiked} />
-                                                                    </button>
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleAddToPlaylistClick(e, res); }} 
-                                                                        className="p-2 text-gray-400 hover:text-white">
-                                                                        <PlusIcon className="w-6 h-6" />
+                                                                
+                                                                {/* כפתור Play צף למולטימדיה */}
+                                                                <div className="absolute bottom-6 left-6 opacity-100 md:opacity-0 md:group-hover:opacity-100 translate-y-0 md:translate-y-2 md:group-hover:translate-y-0 transition-all duration-300">
+                                                                    <button 
+                                                                        onClick={(e) => { e.stopPropagation(); handleResultClick(topResult); }}
+                                                                        className="w-14 h-14 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-xl hover:scale-105"
+                                                                    >
+                                                                        <PlayIcon className="w-7 h-7 ml-1" fill />
                                                                     </button>
                                                                 </div>
                                                             </div>
                                                         );
-                                                    })}
+                                                    })()}
+
+                                                    {/* רשימת 4 השירים הבאים (שמאל) */}
+                                                    <div className="md:col-span-3 flex flex-col gap-2">
+                                                        <h2 className="text-xl font-bold text-white mb-2 px-1">שירים קשורים</h2>
+                                                        {searchResults
+                                                            .filter(r => !r.type || r.type === 'song' || r.type === 'video')
+                                                            .filter(r => r.id !== searchResults[0].id) // מדלג על התוצאה הראשונה שכבר מוצגת בריבוע
+                                                            .slice(0, 4)
+                                                            .map((res) => {
+                                                                const isPlaying = playerState.currentSong?.id === res.id;
+                                                                const isLiked = likedSongsPlaylist?.songs.some(s => s.id === res.id);
+                                                                
+                                                                return (
+                                                                    <div key={res.id} onClick={() => handleResultClick(res)} 
+                                                                        className={`flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-xl group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary bg-spotify-primary/10' : 'border-transparent'}`}>
+                                                                        <div className="w-12 h-12 bg-neutral-800 rounded-lg flex items-center justify-center text-gray-400 flex-shrink-0 shadow-md">
+                                                                            <MusicIcon className={`w-6 h-6 ${isPlaying ? 'text-spotify-primary' : ''}`} />
+                                                                        </div>
+                                                                        <div className="flex-1 min-w-0 text-right">
+                                                                            <div className={`text-[15px] font-bold truncate leading-tight ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
+                                                                            <div className="text-[13px] text-gray-400 truncate mt-0.5">{res.author}</div>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} className={`p-2 transition-all ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-500 hover:text-white'}`}>
+                                                                                <HeartIcon className="w-5 h-5" filled={isLiked} />
+                                                                           </button>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                    </div>
                                                 </div>
                                             </section>
                                         )}
 
-                                        {/* 2. פלייליסטים - מקום שני, ריבועים גדולים (גודל ספוטיפיי) */}
+                                        {/* 1. שירים (מציג את שאר השירים שלא נכנסו למעלה) */}
+                                        {(() => {
+                                            const songsToDisplay = searchResults
+                                                .filter(r => !r.type || r.type === 'song' || r.type === 'video')
+                                                .filter((r) => {
+                                                    if (ytMusicFilter !== 'all') return true;
+                                                    // סינון שירים שכבר הוצגו ב"תוצאה המובילה"
+                                                    const topResultId = searchResults[0].id;
+                                                    if (r.id === topResultId) return false;
+                                                    const allSongsWithoutTop = searchResults.filter(s => !s.type || s.type === 'song' || s.type === 'video').filter(s => s.id !== topResultId);
+                                                    const idx = allSongsWithoutTop.findIndex(s => s.id === r.id);
+                                                    return idx >= 4; // מציג רק מהשיר ה-5 ומעלה
+                                                });
+
+                                            if (songsToDisplay.length === 0) return null;
+
+                                            return (
+                                                <section>
+                                                    {ytMusicFilter !== 'all' && <h2 className="text-xl font-bold text-white mb-4 px-1">שירים</h2>}
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                        {songsToDisplay.map((res) => {
+                                                            const isPlaying = playerState.currentSong?.id === res.id;
+                                                            const isLiked = likedSongsPlaylist?.songs.some(s => s.id === res.id);
+                                                            
+                                                            return (
+                                                                <div key={res.id} onClick={() => handleResultClick(res)} 
+                                                                    className={`flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-xl group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary bg-spotify-primary/10' : 'border-white/5'}`}>
+                                                                    <div className="w-12 h-12 bg-neutral-800 rounded-lg flex items-center justify-center text-gray-400 flex-shrink-0 shadow-lg">
+                                                                        <MusicIcon className={`w-6 h-6 ${isPlaying ? 'text-spotify-primary' : ''}`} />
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0 text-right" dir="rtl">
+                                                                        <div className={`text-[15px] font-bold truncate leading-tight ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
+                                                                        <div className="text-[13px] text-gray-400 truncate mt-1">{res.author}</div>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} 
+                                                                            className={`p-2 transition-all ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-500 hover:text-white'}`}>
+                                                                            <HeartIcon className="w-6 h-6" filled={isLiked} />
+                                                                        </button>
+                                                                        <button onClick={(e) => { e.stopPropagation(); handleAddToPlaylistClick(e, res); }} 
+                                                                            className="p-2 text-gray-400 hover:text-white">
+                                                                            <PlusIcon className="w-6 h-6" />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </section>
+                                            );
+                                        })()}
+
+                                        {/* 2. פלייליסטים ... */}
                                         {searchResults.filter(r => r.type === 'playlist').length > 0 && (
                                             <section>
                                                 <h2 className="text-xl font-bold text-white mb-4 px-1">פלייליסטים</h2>
@@ -2109,7 +2298,7 @@ const App: React.FC = () => {
                                             </section>
                                         )}
 
-                                        {/* 3. אמנים - עיגולים */}
+                                        {/* 3. אמנים ... */}
                                         {searchResults.filter(r => r.type === 'artist').length > 0 && (
                                             <section>
                                                 <h2 className="text-xl font-bold text-white mb-4 px-1">אמנים</h2>
@@ -2126,24 +2315,29 @@ const App: React.FC = () => {
                                             </section>
                                         )}
 
-                                        {/* 4. אלבומים - עיגול (דיסק) בלבד - ללא ריבוע! */}
+                                        {/* 4. אלבומים - תקליט בולט וצבעוני יותר לשמש */}
                                         {searchResults.filter(r => r.type === 'album').length > 0 && (
                                             <section>
                                                 <h2 className="text-xl font-bold text-white mb-4 px-1">אלבומים</h2>
                                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-8 px-1">
                                                     {searchResults.filter(r => r.type === 'album').map((res) => (
                                                         <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col items-center cursor-pointer group text-center">
-                                                            <div className="relative w-full aspect-square mb-4 rounded-full bg-black border-4 border-[#282828] flex items-center justify-center shadow-2xl group-hover:scale-105 transition-transform duration-300 overflow-hidden">
-                                                                {/* מרכז הדיסק (החור) */}
-                                                                <div className="w-12 h-12 rounded-full border-4 border-white/5 bg-neutral-900 flex items-center justify-center z-20">
-                                                                    <div className="w-3 h-3 rounded-full bg-black"></div>
+                                                            <div className="relative w-full aspect-square mb-4 rounded-full bg-gradient-to-br from-gray-600 via-neutral-800 to-black border-[3px] border-gray-500 flex items-center justify-center shadow-[0_8px_30px_rgba(0,0,0,0.6)] group-hover:scale-105 transition-transform duration-300 overflow-hidden">
+                                                                
+                                                                {/* מרכז הדיסק (הלייבל) - עכשיו עם צבע אפור מתכתי קונטרסטי לחלוטין */}
+                                                                <div className="w-[35%] h-[35%] rounded-full border-2 border-gray-400 bg-gradient-to-tr from-gray-700 to-gray-400 flex items-center justify-center z-20 shadow-inner">
+                                                                    <div className="w-3 h-3 rounded-full bg-[#181818] shadow-inner"></div>
                                                                 </div>
-                                                                {/* חריצי תקליט עדינים */}
-                                                                <div className="absolute inset-4 rounded-full border border-white/5 opacity-20"></div>
-                                                                <div className="absolute inset-8 rounded-full border border-white/5 opacity-10"></div>
-                                                                <div className="absolute inset-0 bg-gradient-to-tr from-black via-transparent to-white/10 opacity-30"></div>
-                                                                {/* אייקון אלבום קטן באמצע */}
-                                                                <AlbumIcon className="absolute w-10 h-10 text-gray-600 opacity-40 bottom-4 right-4" />
+                                                                
+                                                                {/* חריצי תקליט עבים ובולטים יותר */}
+                                                                <div className="absolute inset-[18%] rounded-full border border-gray-400/40"></div>
+                                                                <div className="absolute inset-[32%] rounded-full border border-gray-400/25"></div>
+                                                                <div className="absolute inset-[46%] rounded-full border border-gray-400/15"></div>
+                                                                
+                                                                {/* אפקט ברק אלכסוני (Glare) לתחושת ויניל */}
+                                                                <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-transparent rotate-45 pointer-events-none"></div>
+                                                                
+                                                                <AlbumIcon className="absolute w-8 h-8 text-white opacity-40 bottom-4 right-4" />
                                                             </div>
                                                             <div className="text-[15px] font-bold text-white line-clamp-2 leading-snug h-11 w-full">{res.title}</div>
                                                             <div className="text-[13px] text-gray-400 truncate w-full">{res.author}</div>
@@ -2152,7 +2346,6 @@ const App: React.FC = () => {
                                                 </div>
                                             </section>
                                         )}
-
                                         {/* 5. פודקאסטים - בנפרד בסוף */}
                                         {searchResults.filter(r => r.type === 'podcast').length > 0 && (
                                             <section>
