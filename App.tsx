@@ -1347,12 +1347,12 @@ const App: React.FC = () => {
     }, [playlistSearchQuery]);
 
     const handleVoiceSearch = async () => {
-        // אם המיקרופון כבר פועל ולחצנו עליו שוב - נסיים ומיד נחפש
+        // אם אנחנו כבר מאזינים ולחצו שוב על המיקרופון - עצירה מיידית
         if (isListening) {
             if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
-            try { await SpeechRecognition.stop(); } catch(e){}
-            setIsListening(false);
+            setIsListening(false); // מעדכנים את המסך מיד!
             SpeechRecognition.removeAllListeners();
+            SpeechRecognition.stop().catch(() => {}); // מבקשים לעצור ברקע, לא ממתינים לזה שיסיים
             if (searchQuery.trim()) performSearch(searchQuery, false);
             return;
         }
@@ -1374,40 +1374,68 @@ const App: React.FC = () => {
             }
 
             setIsListening(true);
-            setSearchQuery(""); // מנקה את שורת החיפוש כדי שנתחיל לכתוב בה בזמן אמת
+            setSearchQuery(""); 
             
-            // מנקים מאזינים קודמים למקרה שהיו
             await SpeechRecognition.removeAllListeners();
 
-            // מאזין שמקבל את המילים *תוך כדי* הדיבור
+            // דגל הגנה (Flag) שמונע מצב שבו החיפוש מופעל פעמיים - גם מהטיימר וגם מסיום ההאזנה של המכשיר
+            let hasFinished = false;
+
+            // פונקציית העזר שמסיימת את תהליך ההאזנה ומפעילה את החיפוש
+            const finalizeSearch = (text: string) => {
+                if (hasFinished) return;
+                hasFinished = true;
+                
+                if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+                
+                // 1. קודם כל סוגרים את חיווי ההאזנה כדי שהלקוח ירגיש שהאפליקציה מהירה
+                setIsListening(false);
+                SpeechRecognition.removeAllListeners();
+                
+                // 2. עוצרים את השירות של המכשיר ברקע, ללא await כדי לא להיתקע
+                SpeechRecognition.stop().catch(() => {});
+                
+                // 3. מפעילים את החיפוש האמיתי
+                if (text.trim()) {
+                    performSearch(text, false);
+                }
+            };
+
+            // מאזין שמקבל את המילים תוך כדי הדיבור
             SpeechRecognition.addListener('partialResults', (data: any) => {
                 if (data.matches && data.matches.length > 0) {
                     const transcript = data.matches[0];
-                    setSearchQuery(transcript); // מציג את הטקסט בשורת החיפוש בזמן אמת!
+                    setSearchQuery(transcript); // מציג את הטקסט למשתמש בזמן אמת
 
-                    // בכל פעם שמילה חדשה מזוהה, אנחנו מאפסים את טיימר השקט
                     if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
 
-                    // מגדירים: אם עברו 1.2 שניות מאז המילה האחרונה - סימן שהלקוח סיים
-                    silenceTimeoutRef.current = setTimeout(async () => {
-                        try { await SpeechRecognition.stop(); } catch(e){}
-                        setIsListening(false);
-                        SpeechRecognition.removeAllListeners();
-                        performSearch(transcript, false); // מפעיל את החיפוש מיד!
-                    }, 1200); // 1.2 שניות (Sweet spot) לדיבור שוטף
+                    // טיימר של 1.5 שניות לשקט - זהו הזמן האידיאלי שלא יחתוך אנשים שחושבים רגע באמצע המשפט
+                    silenceTimeoutRef.current = setTimeout(() => {
+                        finalizeSearch(transcript);
+                    }, 1500); 
                 }
             });
 
-            // מתחילים האזנה - הפעם נסתרת וללא הפופ-אפ האיטי
-            await SpeechRecognition.start({
+            // מתחילים האזנה - השמירה למשתנה 'result' מאפשרת לנו לתפוס את הסיום הטבעי
+            const result = await SpeechRecognition.start({
                 language: "he-IL",
                 maxResults: 1,
-                partialResults: true, // חובה להיות דלוק כדי שנקבל מילים בזמן אמת
-                popup: false // מכבים את הפופ-אפ של אנדרואיד! האפליקציה שלנו מנהלת את זה
+                partialResults: true,
+                popup: false 
             });
 
+            // אם המשתמש סיים לדבר, ומערכת ההפעלה זיהתה את זה לפני שהטיימר של ה-1.5 שניות שלנו קפץ
+            if (result && result.matches && result.matches.length > 0) {
+                finalizeSearch(result.matches[0]);
+            } else {
+                // אם המכשיר עצר ולא זיהה כלום (לדוגמה, המשתמש פשוט שתק)
+                finalizeSearch(searchQuery);
+            }
+
         } catch (e) {
-            console.error("Voice search error:", e);
+            // במידה והמשתמש שותק לאורך זמן, הפלאגין לעיתים זורק שגיאת "No Match" - נתפוס אותה באלגנטיות
+            console.error("Voice search ended or error:", e);
+            if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
             setIsListening(false);
             SpeechRecognition.removeAllListeners();
         }
