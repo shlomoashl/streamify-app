@@ -1350,9 +1350,9 @@ const App: React.FC = () => {
         // אם אנחנו כבר מאזינים ולחצו שוב על המיקרופון - עצירה מיידית
         if (isListening) {
             if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
-            setIsListening(false); // מעדכנים את המסך מיד!
+            setIsListening(false);
             SpeechRecognition.removeAllListeners();
-            SpeechRecognition.stop().catch(() => {}); // מבקשים לעצור ברקע, לא ממתינים לזה שיסיים
+            SpeechRecognition.stop().catch(() => {});
             if (searchQuery.trim()) performSearch(searchQuery, false);
             return;
         }
@@ -1378,25 +1378,20 @@ const App: React.FC = () => {
             
             await SpeechRecognition.removeAllListeners();
 
-            // דגל הגנה (Flag) שמונע מצב שבו החיפוש מופעל פעמיים - גם מהטיימר וגם מסיום ההאזנה של המכשיר
             let hasFinished = false;
 
-            // פונקציית העזר שמסיימת את תהליך ההאזנה ומפעילה את החיפוש
+            // פונקציית העזר שמסיימת את תהליך ההאזנה
             const finalizeSearch = (text: string) => {
                 if (hasFinished) return;
                 hasFinished = true;
                 
                 if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
                 
-                // 1. קודם כל סוגרים את חיווי ההאזנה כדי שהלקוח ירגיש שהאפליקציה מהירה
                 setIsListening(false);
                 SpeechRecognition.removeAllListeners();
-                
-                // 2. עוצרים את השירות של המכשיר ברקע, ללא await כדי לא להיתקע
                 SpeechRecognition.stop().catch(() => {});
                 
-                // 3. מפעילים את החיפוש האמיתי
-                if (text.trim()) {
+                if (text && text.trim()) {
                     performSearch(text, false);
                 }
             };
@@ -1409,31 +1404,27 @@ const App: React.FC = () => {
 
                     if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
 
-                    // טיימר של 1.5 שניות לשקט - זהו הזמן האידיאלי שלא יחתוך אנשים שחושבים רגע באמצע המשפט
+                    // ברגע שזוהתה מילה, אנחנו נותנים ללקוח 1.5 שניות של שקט לפני שסוגרים ומחפשים
                     silenceTimeoutRef.current = setTimeout(() => {
                         finalizeSearch(transcript);
                     }, 1500); 
                 }
             });
 
-            // מתחילים האזנה - השמירה למשתנה 'result' מאפשרת לנו לתפוס את הסיום הטבעי
-            const result = await SpeechRecognition.start({
+            // טיימר ביטחון התחלתי: אם הלקוח לחץ אבל לא הוציא מילה במשך 5 שניות - סוגרים את המיקרופון
+            silenceTimeoutRef.current = setTimeout(() => {
+                finalizeSearch("");
+            }, 5000);
+
+            // מתחילים האזנה. הסרנו את התנאים שהיו כאן, כי אנחנו סומכים על ה-addListener והטיימר בלבד
+            await SpeechRecognition.start({
                 language: "he-IL",
                 maxResults: 1,
                 partialResults: true,
                 popup: false 
             });
 
-            // אם המשתמש סיים לדבר, ומערכת ההפעלה זיהתה את זה לפני שהטיימר של ה-1.5 שניות שלנו קפץ
-            if (result && result.matches && result.matches.length > 0) {
-                finalizeSearch(result.matches[0]);
-            } else {
-                // אם המכשיר עצר ולא זיהה כלום (לדוגמה, המשתמש פשוט שתק)
-                finalizeSearch(searchQuery);
-            }
-
         } catch (e) {
-            // במידה והמשתמש שותק לאורך זמן, הפלאגין לעיתים זורק שגיאת "No Match" - נתפוס אותה באלגנטיות
             console.error("Voice search ended or error:", e);
             if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
             setIsListening(false);
