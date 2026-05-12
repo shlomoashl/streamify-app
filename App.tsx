@@ -1719,7 +1719,6 @@ const App: React.FC = () => {
 
         if (result.type === 'spotify_playlist') { handleSpotifyImport(result.id); return; }
         
-        setGlobalLoading("מתחיל לנגן...");
         try {
             const cleanBase = YOUTUBE_API_BASE.replace(/\/$/, "");
             const finalUrl = `${cleanBase}/ytmusic-browse/${result.id}?type=${result.type}`;
