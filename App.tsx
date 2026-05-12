@@ -2306,7 +2306,7 @@ const App: React.FC = () => {
                                                 {/* שינינו את הגריד ל-2 עמודות עם gap-x-6, בדיוק כמו הגריד של השירים למטה! */}
                                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-4" dir="rtl">
                                                     
-                                                    {/* קופסת התוצאה המובילה - עכשיו מקבלת h-full ו- flex-col כדי להימתח למלבן מושלם */}
+                                                    {/* קופסת התוצאה המובילה - הוקטנה בגובה כדי למשוך את השורה התחתונה למעלה */}
                                                     {(() => {
                                                         const topResult = searchResults[0];
                                                         const topType = topResult.type || 'song';
@@ -2315,17 +2315,17 @@ const App: React.FC = () => {
                                                         return (
                                                             <div 
                                                                 onClick={() => handleResultClick(topResult)}
-                                                                className="lg:col-span-1 h-full bg-gradient-to-br from-[#282828] to-[#121212] hover:from-[#383838] p-6 rounded-2xl cursor-pointer transition-all group relative flex flex-col justify-center border border-white/10 shadow-2xl"
+                                                                className="lg:col-span-1 h-full bg-gradient-to-br from-[#282828] to-[#121212] hover:from-[#383838] p-5 rounded-2xl cursor-pointer transition-all group relative flex flex-col justify-center border border-white/10 shadow-2xl"
                                                             >
-                                                                {/* האייקון ממורכז אוטומטית */}
-                                                                <div className={`w-32 h-32 mb-6 mx-auto lg:mx-0 flex items-center justify-center relative
+                                                                {/* הקטנו את התמונה מ-w-32 ל-w-28 ואת הרווח כדי להפוך את הקלף ליותר צר ומלבני */}
+                                                                <div className={`w-28 h-28 mb-4 mx-auto lg:mx-0 flex items-center justify-center relative
                                                                     ${topType === 'artist' ? 'rounded-full border-2 border-white/5 shadow-2xl bg-[#282828]' : ''}
                                                                     ${topType === 'album' ? 'rounded-full border-[2px] border-[#555] shadow-2xl bg-gradient-to-tr from-[#222] via-[#333] to-[#222]' : ''}
                                                                     ${topType === 'podcast' ? 'rounded-2xl shadow-xl bg-[#222222]' : ''}
                                                                     ${topType === 'playlist' || topType === 'spotify_playlist' ? 'rounded-xl shadow-xl bg-[#282828]' : ''}
                                                                     ${topType === 'song' || topType === 'video' ? 'rounded-xl shadow-xl bg-[#282828] overflow-hidden' : ''}
                                                                 `}>
-                                                                    {topType === 'artist' && <ArtistIcon className="w-16 h-16 text-gray-500" />}
+                                                                    {topType === 'artist' && <ArtistIcon className="w-14 h-14 text-gray-500" />}
                                                                     
                                                                     {topType === 'album' && (
                                                                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -2335,14 +2335,14 @@ const App: React.FC = () => {
                                                                         </div>
                                                                     )}
 
-                                                                    {topType === 'podcast' && <PodcastIcon className="w-16 h-16 text-gray-500" />}
-                                                                    {(topType === 'playlist' || topType === 'spotify_playlist') && <PlaylistIcon className="w-16 h-16 text-gray-500" />}
+                                                                    {topType === 'podcast' && <PodcastIcon className="w-14 h-14 text-gray-500" />}
+                                                                    {(topType === 'playlist' || topType === 'spotify_playlist') && <PlaylistIcon className="w-14 h-14 text-gray-500" />}
                                                                     {(topType === 'song' || topType === 'video') && (
-                                                                        topResult.thumbnail_url ? <img src={topResult.thumbnail_url} className="w-full h-full object-cover" /> : <MusicIcon className="w-16 h-16 text-gray-500" />
+                                                                        topResult.thumbnail_url ? <img src={topResult.thumbnail_url} className="w-full h-full object-cover" /> : <MusicIcon className="w-14 h-14 text-gray-500" />
                                                                     )}
                                                                 </div>
                                                                 
-                                                                <h3 className={`text-3xl font-black truncate mb-2 ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>
+                                                                <h3 className={`text-3xl font-black truncate mb-1 ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>
                                                                     {topResult.title}
                                                                 </h3>
                                                                 <div className="flex items-center gap-2">
@@ -2352,12 +2352,13 @@ const App: React.FC = () => {
                                                                     {topType !== 'artist' && <span className="text-gray-400 text-sm font-medium truncate">{topResult.author || topResult.channel}</span>}
                                                                 </div>
                                                                 
-                                                                <div className="absolute bottom-6 left-6 scale-110 z-20">
+                                                                {/* התאמנו את כפתור הפליי לגודל החדש של הקלף */}
+                                                                <div className="absolute bottom-5 left-5 scale-110 z-20">
                                                                     <button 
                                                                         onClick={(e) => handleDirectPlay(e, topResult)}
-                                                                        className="w-14 h-14 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-xl hover:scale-110 active:scale-95 transition-all"
+                                                                        className="w-12 h-12 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-xl hover:scale-110 active:scale-95 transition-all"
                                                                     >
-                                                                        <PlayIcon className="w-7 h-7 ml-1" fill />
+                                                                        <PlayIcon className="w-6 h-6 ml-1" fill />
                                                                     </button>
                                                                 </div>
                                                             </div>
