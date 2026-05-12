@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import { KeepAwake } from '@capacitor-community/keep-awake';
 import { Network } from '@capacitor/network';
 import { App as CapacitorApp } from '@capacitor/app';
@@ -1344,48 +1345,53 @@ const App: React.FC = () => {
         return () => clearTimeout(handler); 
     }, [playlistSearchQuery]);
 
-    const handleVoiceSearch = () => {
-        // משיכת המנוע של גוגל מהדפדפן
-        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-        if (!SpeechRecognition) {
-            alert("חיפוש קולי לא נתמך במכשיר זה.");
-            return;
-        }
-
-        const recognition = new SpeechRecognition();
-        recognition.lang = 'he-IL'; // מוגדר לעברית
-        recognition.interimResults = false;
-        recognition.maxAlternatives = 1;
-
-        recognition.onstart = () => {
-            setIsListening(true);
-        };
-
-        recognition.onresult = (event: any) => {
-            const transcript = event.results[0][0].transcript;
-            setSearchQuery(transcript); // מכניס את מה שאמרנו לתיבת הטקסט
-            performSearch(transcript, false); // מפעיל את החיפוש מיד!
-        };
-
-        recognition.onerror = (event: any) => {
-            console.error("Voice search error:", event.error);
-            setIsListening(false);
-            if (event.error === 'not-allowed') {
-                alert("יש לאשר גישה למיקרופון בהגדרות כדי להשתמש בחיפוש קולי.");
-            }
-        };
-
-        recognition.onend = () => {
-            setIsListening(false);
-        };
-
+    const handleVoiceSearch = async () => {
         try {
-            recognition.start();
+            // 1. בדיקה אם המכשיר תומך בזיהוי קולי
+            const { available } = await SpeechRecognition.available();
+            if (!available) {
+                alert("חיפוש קולי לא נתמך במכשיר זה.");
+                return;
+            }
+
+            // 2. מערכת חכמה לבקשת הרשאות ישירות מתוך האפליקציה
+            const permissions = await SpeechRecognition.checkPermissions();
+            if (permissions.speechRecognition !== 'granted') {
+                const requested = await SpeechRecognition.requestPermissions();
+                if (requested.speechRecognition !== 'granted') {
+                    alert("חובה לאשר גישה למיקרופון כדי להשתמש בחיפוש קולי.");
+                    return;
+                }
+            }
+
+            setIsListening(true);
+
+            // 3. מאזין לתוצאה שתחזור מגוגל
+            SpeechRecognition.addListener('partialResults', (data: any) => {
+                if (data.matches && data.matches.length > 0) {
+                    const transcript = data.matches[0];
+                    setSearchQuery(transcript);
+                    performSearch(transcript, false); // מפעיל את החיפוש מיד!
+                    setIsListening(false);
+                    SpeechRecognition.removeAllListeners(); // מנקה מאזינים כדי לא להעמיס
+                }
+            });
+
+            // 4. הפעלת מנוע החיפוש הנייטיב של גוגל!
+            await SpeechRecognition.start({
+                language: "he-IL",
+                maxResults: 1,
+                prompt: "איזה שיר תרצה לשמוע?", // הטקסט שיופיע מעל המיקרופון
+                partialResults: false,
+                popup: true // זה הקסם! פותח את החלון המקורי והיפה של גוגל אנדרואיד
+            });
+
         } catch (e) {
-            console.error("Failed to start speech recognition", e);
+            console.error("Voice search error:", e);
+            setIsListening(false);
+            SpeechRecognition.removeAllListeners();
         }
-    };  
+    }; 
 
     const performSearch = async (term: string, isPlaylistContext: boolean) => {
         const spotifyMatch = term.match(/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)/); 
