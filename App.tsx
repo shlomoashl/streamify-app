@@ -1366,32 +1366,30 @@ const App: React.FC = () => {
 
             setIsListening(true);
 
-            // 3. מאזין לתוצאה שתחזור מגוגל
-            SpeechRecognition.addListener('partialResults', (data: any) => {
-                if (data.matches && data.matches.length > 0) {
-                    const transcript = data.matches[0];
-                    setSearchQuery(transcript);
-                    performSearch(transcript, false); // מפעיל את החיפוש מיד!
-                    setIsListening(false);
-                    SpeechRecognition.removeAllListeners(); // מנקה מאזינים כדי לא להעמיס
-                }
-            });
-
-            // 4. הפעלת מנוע החיפוש הנייטיב של גוגל!
-            await SpeechRecognition.start({
+            // 3. הפעלת מנוע החיפוש ומעבר של התוצאה ישירות למשתנה (הקוד ימתין פה עד שתסיים לדבר)
+            const result = await SpeechRecognition.start({
                 language: "he-IL",
                 maxResults: 1,
-                prompt: "איזה שיר תרצה לשמוע?", // הטקסט שיופיע מעל המיקרופון
-                partialResults: false,
-                popup: true // זה הקסם! פותח את החלון המקורי והיפה של גוגל אנדרואיד
+                prompt: "איזה שיר תרצה לשמוע?",
+                partialResults: false, // אנחנו רוצים רק את המשפט הסופי
+                popup: true // החלון של אנדרואיד
             });
 
+            // 4. החלון נסגר, בודקים אם יש תוצאה ומפעילים את החיפוש!
+            if (result && result.matches && result.matches.length > 0) {
+                const transcript = result.matches[0];
+                setSearchQuery(transcript);
+                performSearch(transcript, false);
+            }
+
         } catch (e) {
-            console.error("Voice search error:", e);
+            // יכול לקרות אם הלקוח לחץ על מסך שחור כדי לבטל את ההקלטה באמצע
+            console.error("Voice search cancelled or error:", e);
+        } finally {
+            // מכבה את הבהוב המיקרופון בכל מצב (הצלחה או ביטול)
             setIsListening(false);
-            SpeechRecognition.removeAllListeners();
         }
-    }; 
+    };
 
     const performSearch = async (term: string, isPlaylistContext: boolean) => {
         const spotifyMatch = term.match(/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)/); 
