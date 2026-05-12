@@ -2300,13 +2300,13 @@ const App: React.FC = () => {
                                         
                                         {/* --- התוצאה המובילה (Top Result) --- */}
                                         {ytMusicFilter === 'all' && searchResults.length > 0 && (
-                                            <section className="mb-1"> {/* שינינו ל-mb-1 כדי שהרווח לשורה שמתחת יהיה זהה לרווח שבין השירים */}
+                                            <section className="mb-1"> {/* הרווח פה הוא בדיוק 4 פיקסלים, כדי להתחבר לשיר ה-5 באופן רצוף */}
                                                 <h2 className="text-xl font-bold text-white mb-4 px-1">התוצאה הטובה ביותר</h2>
                                                 
-                                                {/* שינינו את הגריד ל-2 עמודות עם gap-x-6, בדיוק כמו הגריד של השירים למטה! */}
-                                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-4" dir="rtl">
+                                                {/* הוספנו פה items-start - זה הקסם שמונע מהעמודות להימתח וסוגר את הרווח המגעיל */}
+                                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-4 lg:gap-y-0 items-start" dir="rtl">
                                                     
-                                                    {/* קופסת התוצאה המובילה - הוקטנה בגובה כדי למשוך את השורה התחתונה למעלה */}
+                                                    {/* הקלף המוביל - החלפנו h-full ב-h-fit כדי שיסתיים גבוה יותר ולא ימתח את המסך */}
                                                     {(() => {
                                                         const topResult = searchResults[0];
                                                         const topType = topResult.type || 'song';
@@ -2315,45 +2315,44 @@ const App: React.FC = () => {
                                                         return (
                                                             <div 
                                                                 onClick={() => handleResultClick(topResult)}
-                                                                className="lg:col-span-1 h-full bg-gradient-to-br from-[#282828] to-[#121212] hover:from-[#383838] p-5 rounded-2xl cursor-pointer transition-all group relative flex flex-col justify-center border border-white/10 shadow-2xl"
+                                                                className="lg:col-span-1 h-fit bg-gradient-to-br from-[#282828] to-[#121212] hover:from-[#383838] p-4 rounded-2xl cursor-pointer transition-all group relative flex flex-col border border-white/10 shadow-2xl"
                                                             >
-                                                                {/* הקטנו את התמונה מ-w-32 ל-w-28 ואת הרווח כדי להפוך את הקלף ליותר צר ומלבני */}
-                                                                <div className={`w-28 h-28 mb-4 mx-auto lg:mx-0 flex items-center justify-center relative
+                                                                {/* הקטנו פה ל-w-24 כדי שהקלף יגמר באמצע השיר הרביעי בדיוק כמו בשרטוט שלך */}
+                                                                <div className={`w-24 h-24 mb-4 mx-auto lg:mx-0 flex items-center justify-center relative
                                                                     ${topType === 'artist' ? 'rounded-full border-2 border-white/5 shadow-2xl bg-[#282828]' : ''}
                                                                     ${topType === 'album' ? 'rounded-full border-[2px] border-[#555] shadow-2xl bg-gradient-to-tr from-[#222] via-[#333] to-[#222]' : ''}
                                                                     ${topType === 'podcast' ? 'rounded-2xl shadow-xl bg-[#222222]' : ''}
                                                                     ${topType === 'playlist' || topType === 'spotify_playlist' ? 'rounded-xl shadow-xl bg-[#282828]' : ''}
                                                                     ${topType === 'song' || topType === 'video' ? 'rounded-xl shadow-xl bg-[#282828] overflow-hidden' : ''}
                                                                 `}>
-                                                                    {topType === 'artist' && <ArtistIcon className="w-14 h-14 text-gray-500" />}
+                                                                    {topType === 'artist' && <ArtistIcon className="w-12 h-12 text-gray-500" />}
                                                                     
                                                                     {topType === 'album' && (
                                                                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                                                            <div className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center bg-[#111] shadow-[0_0_10px_rgba(0,0,0,0.5)]">
-                                                                                <div className="w-4 h-4 bg-[#181818] rounded-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.8)]"></div>
+                                                                            <div className="w-8 h-8 rounded-full border border-white/20 flex items-center justify-center bg-[#111] shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+                                                                                <div className="w-3 h-3 bg-[#181818] rounded-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.8)]"></div>
                                                                             </div>
                                                                         </div>
                                                                     )}
 
-                                                                    {topType === 'podcast' && <PodcastIcon className="w-14 h-14 text-gray-500" />}
-                                                                    {(topType === 'playlist' || topType === 'spotify_playlist') && <PlaylistIcon className="w-14 h-14 text-gray-500" />}
+                                                                    {topType === 'podcast' && <PodcastIcon className="w-12 h-12 text-gray-500" />}
+                                                                    {(topType === 'playlist' || topType === 'spotify_playlist') && <PlaylistIcon className="w-12 h-12 text-gray-500" />}
                                                                     {(topType === 'song' || topType === 'video') && (
-                                                                        topResult.thumbnail_url ? <img src={topResult.thumbnail_url} className="w-full h-full object-cover" /> : <MusicIcon className="w-14 h-14 text-gray-500" />
+                                                                        topResult.thumbnail_url ? <img src={topResult.thumbnail_url} className="w-full h-full object-cover" /> : <MusicIcon className="w-12 h-12 text-gray-500" />
                                                                     )}
                                                                 </div>
                                                                 
-                                                                <h3 className={`text-3xl font-black truncate mb-1 ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>
+                                                                <h3 className={`text-2xl font-black truncate mb-1 ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>
                                                                     {topResult.title}
                                                                 </h3>
-                                                                <div className="flex items-center gap-2">
+                                                                <div className="flex items-center gap-2 mb-2">
                                                                     <span className="bg-spotify-primary/20 text-spotify-primary px-3 py-1 rounded-full text-[12px] font-bold tracking-wide">
                                                                         {topType === 'artist' ? 'אמן' : topType === 'playlist' || topType === 'spotify_playlist' ? 'פלייליסט' : topType === 'album' ? 'אלבום' : 'שיר'}
                                                                     </span>
                                                                     {topType !== 'artist' && <span className="text-gray-400 text-sm font-medium truncate">{topResult.author || topResult.channel}</span>}
                                                                 </div>
                                                                 
-                                                                {/* התאמנו את כפתור הפליי לגודל החדש של הקלף */}
-                                                                <div className="absolute bottom-5 left-5 scale-110 z-20">
+                                                                <div className="absolute bottom-4 left-4 scale-110 z-20">
                                                                     <button 
                                                                         onClick={(e) => handleDirectPlay(e, topResult)}
                                                                         className="w-12 h-12 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-xl hover:scale-110 active:scale-95 transition-all"
@@ -2365,7 +2364,7 @@ const App: React.FC = () => {
                                                         );
                                                     })()}
 
-                                                    {/* רשימת 4 השירים הבאים - יושבים בדיוק בעמודה השמאלית */}
+                                                    {/* רשימת 4 השירים הבאים - העמודה הזו עכשיו תקבע את הגובה! */}
                                                     <div className="lg:col-span-1 flex flex-col gap-1 bg-transparent">
                                                         {searchResults
                                                             .filter(r => !r.type || r.type === 'song' || r.type === 'video')
