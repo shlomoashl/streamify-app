@@ -2356,79 +2356,82 @@ const App: React.FC = () => {
                                         })()}
 
                                         {/* קומפוננטת רינדור עם עיצוב וקטורי שונה לכל סוג */}
-                                        {(() => {
-                                            const renderGridSection = (title, type, items) => {
-                                                if (items.length === 0) return null;
-                                                
-                                                const styles = {
-                                                    artist: { card: "items-center text-center", bg: "bg-transparent hover:bg-white/5", titleColor: "text-white" },
-                                                    album: { card: "items-center text-center", bg: "bg-transparent hover:bg-white/5", titleColor: "text-white" },
-                                                    playlist: { card: "text-right", bg: "bg-[#181818] hover:bg-[#282828]", titleColor: "group-hover:text-spotify-primary text-white" },
-                                                    podcast: { card: "text-right", bg: "bg-[#252525] hover:bg-[#303030]", titleColor: "text-white" }
+                                        {/* קומפוננטת רינדור עם עיצוב וקטורי שונה לכל סוג */}
+                                            {(() => {
+                                                const renderGridSection = (title, type, items) => {
+                                                    if (items.length === 0) return null;
+                                                    
+                                                    const styles = {
+                                                        artist: { card: "items-center text-center", bg: "bg-transparent hover:bg-white/5", titleColor: "text-white" },
+                                                        album: { card: "items-center text-center", bg: "bg-transparent hover:bg-white/5", titleColor: "text-white" },
+                                                        playlist: { card: "text-right", bg: "bg-[#181818] hover:bg-[#282828]", titleColor: "group-hover:text-spotify-primary text-white" },
+                                                        podcast: { card: "text-right", bg: "bg-[#252525] hover:bg-[#303030]", titleColor: "text-white" }
+                                                    };
+
+                                                    const s = styles[type] || styles.album;
+                                                    
+                                                    return (
+                                                        <section className="mb-8">
+                                                            <h2 className="text-xl font-bold text-white mb-4 px-1">{title}</h2>
+                                                            {/* רספונסיביות מעודכנת לטאבלטים ומחשבים */}
+                                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6 px-1">
+                                                                {items.map((res) => (
+                                                                    <div key={res.id} onClick={() => handleResultClick(res)} 
+                                                                        className={`flex flex-col p-4 ${s.bg} ${s.card} rounded-2xl cursor-pointer transition-all relative group border border-transparent hover:border-white/10`} dir="rtl">
+                                                                        
+                                                                        <div className={`relative w-full aspect-square mb-4 flex items-center justify-center
+                                                                            ${type === 'artist' ? 'rounded-full border-2 border-white/5 shadow-xl bg-[#282828]' : ''}
+                                                                            ${type === 'album' ? 'rounded-full border-[2px] border-[#555] shadow-2xl bg-gradient-to-tr from-[#222] via-[#333] to-[#222]' : ''}
+                                                                            ${type === 'podcast' ? 'rounded-2xl shadow-lg bg-[#222222]' : ''}
+                                                                            ${type === 'playlist' || type === 'spotify_playlist' ? 'rounded-xl shadow-lg bg-[#282828]' : ''}
+                                                                        `}>
+                                                                            {/* הקטנו מעט את האייקונים כדי שלא יריבו עם כפתור הפליי (w-2/5) */}
+                                                                            {type === 'artist' && <ArtistIcon className="w-2/5 h-2/5 text-gray-500" />}
+                                                                            
+                                                                            {type === 'album' && (
+                                                                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                                                    <div className="w-[35%] h-[35%] rounded-full border border-white/20 flex items-center justify-center bg-[#111] shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+                                                                                        <div className="w-[30%] h-[30%] bg-[#181818] rounded-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.8)]"></div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+
+                                                                            {type === 'podcast' && <PodcastIcon className="w-2/5 h-2/5 text-gray-500" />}
+                                                                            {(type === 'playlist' || type === 'spotify_playlist') && <PlaylistIcon className="w-2/5 h-2/5 text-gray-500" />}
+                                                                            
+                                                                            {/* כפתור Play צף: קטן יותר במובייל, עם צל חזק שמונע היבלעות */}
+                                                                            {type !== 'artist' && (
+                                                                                <button 
+                                                                                    onClick={(e) => handleDirectPlay(e, res)}
+                                                                                    className={`absolute bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-[0_4px_12px_rgba(0,0,0,0.6)] hover:scale-110 active:scale-95 transition-transform z-20
+                                                                                    w-8 h-8 md:w-10 md:h-10
+                                                                                    ${type === 'album' ? 'bottom-0 left-0' : 'bottom-1.5 left-1.5'}`}
+                                                                                >
+                                                                                    <PlayIcon className="w-4 h-4 md:w-5 md:h-5 ml-0.5" fill />
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                        
+                                                                        <div className={`text-[15px] font-bold truncate w-full px-1 ${s.titleColor || ''}`}>{res.title}</div>
+                                                                        <div className="text-[12px] text-gray-400 truncate w-full px-1 mt-1 font-medium">
+                                                                            {type === 'artist' ? 'אמן' : (res.author || (type === 'playlist' ? 'פלייליסט' : ''))}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </section>
+                                                    );
                                                 };
 
-                                                const s = styles[type] || styles.album;
-                                                
                                                 return (
-                                                    <section className="mb-8">
-                                                        <h2 className="text-xl font-bold text-white mb-4 px-1">{title}</h2>
-                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 px-1">
-                                                            {items.map((res) => (
-                                                                <div key={res.id} onClick={() => handleResultClick(res)} 
-                                                                    className={`flex flex-col p-4 ${s.bg} ${s.card} rounded-2xl cursor-pointer transition-all relative group border border-transparent hover:border-white/10`} dir="rtl">
-                                                                    
-                                                                    <div className={`relative w-full aspect-square mb-4 flex items-center justify-center
-                                                                        ${type === 'artist' ? 'rounded-full border-2 border-white/5 shadow-xl bg-[#282828]' : ''}
-                                                                        ${type === 'album' ? 'rounded-full border-[2px] border-[#555] shadow-2xl bg-gradient-to-tr from-[#222] via-[#333] to-[#222]' : ''}
-                                                                        ${type === 'podcast' ? 'rounded-2xl shadow-lg bg-[#222222]' : ''}
-                                                                        ${type === 'playlist' || type === 'spotify_playlist' ? 'rounded-xl shadow-lg bg-[#282828]' : ''}
-                                                                    `}>
-                                                                        {type === 'artist' && <ArtistIcon className="w-1/2 h-1/2 text-gray-500" />}
-                                                                        
-                                                                        {/* עיצוב דיסק נקי ללא SVG */}
-                                                                        {type === 'album' && (
-                                                                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                                                                <div className="w-[35%] h-[35%] rounded-full border border-white/20 flex items-center justify-center bg-[#111] shadow-[0_0_10px_rgba(0,0,0,0.5)]">
-                                                                                    <div className="w-[30%] h-[30%] bg-[#181818] rounded-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.8)]"></div>
-                                                                                </div>
-                                                                            </div>
-                                                                        )}
-
-                                                                        {type === 'podcast' && <PodcastIcon className="w-1/2 h-1/2 text-gray-500" />}
-                                                                        {(type === 'playlist' || type === 'spotify_playlist') && <PlaylistIcon className="w-1/2 h-1/2 text-gray-500" />}
-                                                                        
-                                                                        {/* כפתור Play צף מותאם למיקום */}
-                                                                        {type !== 'artist' && (
-                                                                            <button 
-                                                                                onClick={(e) => handleDirectPlay(e, res)}
-                                                                                className={`absolute w-10 h-10 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-2xl hover:scale-110 active:scale-95 transition-transform z-20
-                                                                                ${type === 'album' ? 'bottom-0 left-0' : 'bottom-2 left-2'}`}
-                                                                            >
-                                                                                <PlayIcon className="w-5 h-5 ml-0.5" fill />
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
-                                                                    
-                                                                    <div className={`text-[15px] font-bold truncate w-full px-1 ${s.titleColor || ''}`}>{res.title}</div>
-                                                                    <div className="text-[12px] text-gray-400 truncate w-full px-1 mt-1 font-medium">
-                                                                        {type === 'artist' ? 'אמן' : (res.author || (type === 'playlist' ? 'פלייליסט' : ''))}
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </section>
+                                                    <>
+                                                        {renderGridSection('פלייליסטים', 'playlist', searchResults.filter(r => r.type === 'playlist' || r.type === 'spotify_playlist'))}
+                                                        {renderGridSection('אמנים', 'artist', searchResults.filter(r => r.type === 'artist'))}
+                                                        {renderGridSection('אלבומים', 'album', searchResults.filter(r => r.type === 'album'))}
+                                                        {renderGridSection('פודקאסטים', 'podcast', searchResults.filter(r => r.type === 'podcast'))}
+                                                    </>
                                                 );
-                                            };
-
-                                            return (
-                                                <>
-                                                    {renderGridSection('פלייליסטים', 'playlist', searchResults.filter(r => r.type === 'playlist' || r.type === 'spotify_playlist'))}
-                                                    {renderGridSection('אמנים', 'artist', searchResults.filter(r => r.type === 'artist'))}
-                                                    {renderGridSection('אלבומים', 'album', searchResults.filter(r => r.type === 'album'))}
-                                                    {renderGridSection('פודקאסטים', 'podcast', searchResults.filter(r => r.type === 'podcast'))}
-                                                </>
-                                            );
-                                        })()}
+                                            })()}
                                     </div>
                                 )}                            
                             </div>
