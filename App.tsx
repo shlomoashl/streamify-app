@@ -2203,10 +2203,10 @@ const App: React.FC = () => {
                                                 <h2 className="text-xl font-bold text-white mb-4 px-1">התוצאה הטובה ביותר</h2>
                                                 <div className="grid grid-cols-1 md:grid-cols-5 gap-4" dir="rtl">
                                                     
-                                                    {/* קופסת התוצאה המובילה - עיצוב פרימיום */}
+                                                    {/* קופסת התוצאה המובילה - עיצוב פרימיום נקי ללא תמונות */}
                                                     {(() => {
                                                         const topResult = searchResults[0];
-                                                        const isCircle = topResult.type === 'artist' || topResult.type === 'album';
+                                                        const topType = topResult.type || 'song';
                                                         const isPlaying = playerState.currentSong?.id === topResult.id;
                                                         
                                                         return (
@@ -2214,25 +2214,39 @@ const App: React.FC = () => {
                                                                 onClick={() => handleResultClick(topResult)}
                                                                 className="md:col-span-2 bg-gradient-to-br from-[#282828] to-[#121212] hover:from-[#383838] p-6 rounded-2xl cursor-pointer transition-all group relative flex flex-col border border-white/10 shadow-2xl"
                                                             >
-                                                                <div className={`w-32 h-32 mb-6 shadow-2xl ${isCircle ? 'rounded-full' : 'rounded-xl'} bg-[#181818] flex items-center justify-center overflow-hidden border-2 border-white/5`}>
-                                                                    {topResult.thumbnail_url ? (
-                                                                        <img src={topResult.thumbnail_url} className="w-full h-full object-cover" />
-                                                                    ) : (
-                                                                        renderSearchIcon(topResult.type)
+                                                                <div className={`w-32 h-32 mb-6 flex items-center justify-center relative
+                                                                    ${topType === 'artist' ? 'rounded-full border-2 border-white/5 shadow-2xl bg-[#282828]' : ''}
+                                                                    ${topType === 'album' ? 'rounded-full border-[8px] border-[#181818] shadow-2xl bg-gradient-to-br from-[#383838] to-[#1e1e1e]' : ''}
+                                                                    ${topType === 'podcast' ? 'rounded-2xl shadow-xl bg-[#222222]' : ''}
+                                                                    ${topType === 'playlist' || topType === 'spotify_playlist' ? 'rounded-xl shadow-xl bg-[#282828]' : ''}
+                                                                    ${topType === 'song' || topType === 'video' ? 'rounded-xl shadow-xl bg-[#282828] overflow-hidden' : ''}
+                                                                `}>
+                                                                    {topType === 'artist' && <ArtistIcon className="w-16 h-16 text-gray-500" />}
+                                                                    {topType === 'album' && (
+                                                                        <>
+                                                                            <AlbumIcon className="w-10 h-10 text-white/10 absolute top-6" />
+                                                                            <div className="w-8 h-8 bg-[#181818] rounded-full shadow-inner border border-black/50 z-0"></div>
+                                                                        </>
+                                                                    )}
+                                                                    {topType === 'podcast' && <PodcastIcon className="w-16 h-16 text-gray-500" />}
+                                                                    {(topType === 'playlist' || topType === 'spotify_playlist') && <PlaylistIcon className="w-16 h-16 text-gray-500" />}
+                                                                    {(topType === 'song' || topType === 'video') && (
+                                                                        topResult.thumbnail_url ? <img src={topResult.thumbnail_url} className="w-full h-full object-cover" /> : <MusicIcon className="w-16 h-16 text-gray-500" />
                                                                     )}
                                                                 </div>
+                                                                
                                                                 <h3 className={`text-3xl font-black truncate mb-2 ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>
                                                                     {topResult.title}
                                                                 </h3>
                                                                 <div className="flex items-center gap-2">
                                                                     <span className="bg-spotify-primary/20 text-spotify-primary px-3 py-1 rounded-full text-[12px] font-bold tracking-wide">
-                                                                        {topResult.type === 'artist' ? 'אמן' : topResult.type === 'playlist' ? 'פלייליסט' : topResult.type === 'album' ? 'אלבום' : 'שיר'}
+                                                                        {topType === 'artist' ? 'אמן' : topType === 'playlist' || topType === 'spotify_playlist' ? 'פלייליסט' : topType === 'album' ? 'אלבום' : 'שיר'}
                                                                     </span>
-                                                                    {topResult.type !== 'artist' && <span className="text-gray-400 text-sm font-medium truncate">{topResult.author || topResult.channel}</span>}
+                                                                    {topType !== 'artist' && <span className="text-gray-400 text-sm font-medium truncate">{topResult.author || topResult.channel}</span>}
                                                                 </div>
                                                                 
                                                                 {/* כפתור Play גדול ומרשים - ניגון ישיר */}
-                                                                <div className="absolute bottom-6 left-6 scale-110">
+                                                                <div className="absolute bottom-6 left-6 scale-110 z-20">
                                                                     <button 
                                                                         onClick={(e) => handleDirectPlay(e, topResult)}
                                                                         className="w-14 h-14 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-xl hover:scale-110 active:scale-95 transition-all"
@@ -2244,7 +2258,7 @@ const App: React.FC = () => {
                                                         );
                                                     })()}
 
-                                                    {/* רשימת 4 השירים הבאים - צמודים ואחידים */}
+                                                    {/* רשימת 4 השירים הבאים - האייקונים תמיד מוצגים (למובייל) */}
                                                     <div className="md:col-span-3 flex flex-col gap-1 bg-transparent">
                                                         {searchResults
                                                             .filter(r => !r.type || r.type === 'song' || r.type === 'video')
@@ -2268,11 +2282,12 @@ const App: React.FC = () => {
                                                                             <div className={`text-[15px] font-bold truncate ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
                                                                             <div className="text-[13px] text-gray-400 truncate">{res.author}</div>
                                                                         </div>
-                                                                        <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100">
-                                                                            <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} className={`p-2 transition-all ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-400'}`}>
+                                                                        {/* הורדנו את ה-opacity כדי שהכפתורים יהיו תמיד גלויים */}
+                                                                        <div className="flex items-center gap-1">
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} className={`p-2 transition-all ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-400 hover:text-white active:scale-95'}`}>
                                                                                 <HeartIcon className="w-5 h-5" filled={isLiked} />
                                                                             </button>
-                                                                            <button onClick={(e) => { e.stopPropagation(); handleAddToPlaylistClick(e, res); }} className="p-2 text-gray-400">
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleAddToPlaylistClick(e, res); }} className="p-2 text-gray-400 hover:text-white transition-all active:scale-95">
                                                                                 <PlusIcon className="w-5 h-5" />
                                                                             </button>
                                                                         </div>
@@ -2284,7 +2299,7 @@ const App: React.FC = () => {
                                             </section>
                                         )}
 
-                                        {/* שירים נוספים (תצוגת רשימה קלאסית) */}
+                                        {/* שירים נוספים (תצוגת רשימה) - אייקונים תמיד מוצגים */}
                                         {(() => {
                                             const songsToDisplay = searchResults
                                                 .filter(r => !r.type || r.type === 'song' || r.type === 'video')
@@ -2316,11 +2331,12 @@ const App: React.FC = () => {
                                                                         <div className={`text-[14px] font-bold truncate ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
                                                                         <div className="text-[12px] text-gray-400 truncate">{res.author}</div>
                                                                     </div>
-                                                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                        <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} className={`p-2 ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-400'}`}>
+                                                                    {/* אייקונים קבועים */}
+                                                                    <div className="flex items-center gap-1">
+                                                                        <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} className={`p-2 transition-all ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-400 hover:text-white active:scale-95'}`}>
                                                                             <HeartIcon className="w-4 h-4" filled={isLiked} />
                                                                         </button>
-                                                                        <button onClick={(e) => { e.stopPropagation(); handleAddToPlaylistClick(e, res); }} className="p-2 text-gray-400">
+                                                                        <button onClick={(e) => { e.stopPropagation(); handleAddToPlaylistClick(e, res); }} className="p-2 text-gray-400 hover:text-white transition-all active:scale-95">
                                                                             <PlusIcon className="w-4 h-4" />
                                                                         </button>
                                                                     </div>
@@ -2332,17 +2348,16 @@ const App: React.FC = () => {
                                             );
                                         })()}
 
-                                        {/* קומפוננטת רינדור עם עיצוב משתנה לפי סוג */}
+                                        {/* קומפוננטת רינדור עם עיצוב וקטורי שונה לכל סוג */}
                                         {(() => {
                                             const renderGridSection = (title, type, items) => {
                                                 if (items.length === 0) return null;
                                                 
-                                                // הגדרת סגנונות ספציפיים לכל קטגוריה - כולל אלבומים מעוגלים
                                                 const styles = {
-                                                    artist: { card: "items-center text-center", img: "rounded-full border-2 border-white/5 shadow-xl", bg: "bg-transparent hover:bg-white/5" },
-                                                    album: { card: "items-center text-center", img: "rounded-full border-2 border-white/5 shadow-xl", bg: "bg-transparent hover:bg-white/5" },
-                                                    playlist: { card: "text-right", img: "rounded-xl shadow-lg", bg: "bg-[#181818] hover:bg-[#282828]", titleColor: "group-hover:text-spotify-primary" },
-                                                    podcast: { card: "text-right", img: "rounded-2xl shadow-lg", bg: "bg-[#252525] hover:bg-[#303030]" }
+                                                    artist: { card: "items-center text-center", bg: "bg-transparent hover:bg-white/5", titleColor: "text-white" },
+                                                    album: { card: "items-center text-center", bg: "bg-transparent hover:bg-white/5", titleColor: "text-white" },
+                                                    playlist: { card: "text-right", bg: "bg-[#181818] hover:bg-[#282828]", titleColor: "group-hover:text-spotify-primary text-white" },
+                                                    podcast: { card: "text-right", bg: "bg-[#252525] hover:bg-[#303030]", titleColor: "text-white" }
                                                 };
 
                                                 const s = styles[type] || styles.album;
@@ -2355,25 +2370,37 @@ const App: React.FC = () => {
                                                                 <div key={res.id} onClick={() => handleResultClick(res)} 
                                                                     className={`flex flex-col p-4 ${s.bg} ${s.card} rounded-2xl cursor-pointer transition-all relative group border border-transparent hover:border-white/10`} dir="rtl">
                                                                     
-                                                                    <div className={`relative w-full aspect-square mb-4 ${s.img} bg-[#282828] flex items-center justify-center overflow-hidden`}>
-                                                                        {res.thumbnail_url ? (
-                                                                            <img src={res.thumbnail_url} className="w-full h-full object-cover" />
-                                                                        ) : (
-                                                                            <div className="scale-150 opacity-20">{renderSearchIcon(res.type)}</div>
+                                                                    <div className={`relative w-full aspect-square mb-4 flex items-center justify-center
+                                                                        ${type === 'artist' ? 'rounded-full border-2 border-white/5 shadow-xl bg-[#282828]' : ''}
+                                                                        ${type === 'album' ? 'rounded-full border-[6px] md:border-[8px] border-[#181818] shadow-2xl bg-gradient-to-br from-[#383838] to-[#1e1e1e]' : ''}
+                                                                        ${type === 'podcast' ? 'rounded-2xl shadow-lg bg-[#222222]' : ''}
+                                                                        ${type === 'playlist' || type === 'spotify_playlist' ? 'rounded-xl shadow-lg bg-[#282828]' : ''}
+                                                                    `}>
+                                                                        {/* החלפת התמונות באייקונים מרכזיים ויפים */}
+                                                                        {type === 'artist' && <ArtistIcon className="w-1/2 h-1/2 text-gray-500" />}
+                                                                        {type === 'album' && (
+                                                                            <>
+                                                                                <AlbumIcon className="w-1/3 h-1/3 text-white/10 absolute top-1/4" />
+                                                                                {/* החור של הדיסק באמצע */}
+                                                                                <div className="w-1/4 h-1/4 bg-[#181818] rounded-full shadow-inner border border-black/50 z-0"></div>
+                                                                            </>
                                                                         )}
+                                                                        {type === 'podcast' && <PodcastIcon className="w-1/2 h-1/2 text-gray-500" />}
+                                                                        {(type === 'playlist' || type === 'spotify_playlist') && <PlaylistIcon className="w-1/2 h-1/2 text-gray-500" />}
                                                                         
-                                                                        {/* כפתור Play צף - ניגון ישיר */}
+                                                                        {/* כפתור Play צף מותאם למיקום */}
                                                                         {type !== 'artist' && (
                                                                             <button 
                                                                                 onClick={(e) => handleDirectPlay(e, res)}
-                                                                                className="absolute bottom-3 left-3 w-10 h-10 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-2xl scale-100 hover:scale-110 transition-transform"
+                                                                                className={`absolute w-10 h-10 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-2xl hover:scale-110 active:scale-95 transition-transform z-20
+                                                                                ${type === 'album' ? 'bottom-0 left-0' : 'bottom-2 left-2'}`}
                                                                             >
                                                                                 <PlayIcon className="w-5 h-5 ml-0.5" fill />
                                                                             </button>
                                                                         )}
                                                                     </div>
                                                                     
-                                                                    <div className={`text-[15px] font-bold text-white truncate w-full px-1 ${s.titleColor || ''}`}>{res.title}</div>
+                                                                    <div className={`text-[15px] font-bold truncate w-full px-1 ${s.titleColor || ''}`}>{res.title}</div>
                                                                     <div className="text-[12px] text-gray-400 truncate w-full px-1 mt-1 font-medium">
                                                                         {type === 'artist' ? 'אמן' : (res.author || (type === 'playlist' ? 'פלייליסט' : ''))}
                                                                     </div>
