@@ -359,6 +359,47 @@ class AudioService {
         }
     }
 
+    public async updateQueue(queue: PlaylistItem[], index: number, contextId?: string) {
+        console.log(`[AudioService] Silent queue update. Size: ${queue.length}, Index: ${index}, Context: ${contextId}`);
+        
+        // 1. עדכון המשתנים הפנימיים ב-JS (קריטי כדי ש"הבא/הקודם" יעבדו נכון בווינדוס)
+        this.webQueue = [...queue];
+        this.webCurrentIndex = index;
+
+        if (this.isNative && !this.fallbackToWeb) {
+            // 2. עדכון הנייטיב (אנדרואיד) - ממירים את השירים לפורמט שנייטיב מבין, בדיוק כמו ב-playQueue
+            try {
+                const mediaItems = queue.map(item => ({
+                    id: item.id,
+                    url: this.getStreamUrl(item.id),
+                    title: item.title,
+                    artist: item.author,
+                    artwork: item.thumbnail || 'https://via.placeholder.com/500',
+                    duration: typeof item.duration === 'number' ? item.duration : 0
+                }));
+                
+                // משתמשים ב-any כדי למנוע שגיאות TypeScript למקרה שהפונקציה טרם הוגדרה ב-types.ts
+                if ((StreamifyMedia as any).updateQueue) {
+                    await (StreamifyMedia as any).updateQueue({
+                        items: mediaItems,
+                        startIndex: index,
+                        contextId: contextId
+                    });
+                } else {
+                    console.warn("[AudioService] Native updateQueue method not found in plugin.");
+                }
+            } catch (e) {
+                console.error("Native updateQueue failed", e);
+            }
+        } else {
+            // 3. לוגיקת צללים לווינדוס/ווב: אחרי ששינינו את התור בשקט, 
+            // נגיד לנגן הצללים להתחיל לחמם את השיר *החדש* שאחרינו בתור המעורבב.
+            setTimeout(() => {
+                this.prepareNextSong(index + 1);
+            }, 1000);
+        }
+    }
+    
     public async skipTo(index: number) {
         if (!this.webQueue || this.webQueue.length <= index) return;
         

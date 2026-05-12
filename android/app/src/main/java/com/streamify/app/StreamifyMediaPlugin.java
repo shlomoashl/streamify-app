@@ -551,6 +551,82 @@ public class StreamifyMediaPlugin extends Plugin {
 
     @OptIn(markerClass = UnstableApi.class)
     @PluginMethod
+    public void updateQueue(PluginCall call) {
+        if (controller == null) {
+            call.reject("Media Service not connected yet");
+            return;
+        }
+
+        JSArray items = call.getArray("items");
+        Integer startIndex = call.getInt("startIndex", 0);
+        String contextId = call.getString("contextId", "");
+
+        if (items == null || items.length() == 0) {
+            call.reject("No items provided");
+            return;
+        }
+
+        handler.post(() -> {
+            try {
+                List<MediaItem> mediaItems = new ArrayList<>();
+                for (int i = 0; i < items.length(); i++) {
+                     try {
+                         JSONObject item = items.getJSONObject(i);
+                         
+                         Bundle extras = new Bundle();
+                         if (!contextId.isEmpty()) {
+                             extras.putString("contextId", contextId);
+                         }
+
+                         MediaMetadata metadata = new MediaMetadata.Builder()
+                            .setTitle(item.optString("title"))
+                            .setArtist(item.optString("artist"))
+                            .setArtworkUri(Uri.parse(item.optString("artwork")))
+                            .setExtras(extras)
+                            .build();
+
+                         MediaItem mediaItem = new MediaItem.Builder()
+                            .setUri(item.getString("url"))
+                            .setMediaId(item.getString("id"))
+                            .setMimeType(MimeTypes.AUDIO_MP4)
+                            .setMediaMetadata(metadata)
+                            .build();
+                         mediaItems.add(mediaItem);
+                     } catch (Exception e) {
+                         Log.e(TAG, "Error parsing queue item at index " + i, e);
+                     }
+                }
+
+                if (mediaItems.isEmpty()) {
+                    call.reject("Failed to parse any items");
+                    return;
+                }
+
+                // --- הקסם של עדכון שקט באנדרואיד ---
+                // 1. שומרים את המיקום המדויק (במילישניות) של השיר הנוכחי
+                long currentPos = controller.getCurrentPosition();
+                boolean wasPlaying = controller.isPlaying();
+
+                // 2. מחליפים את כל התור, מתמקמים על האינדקס החדש של השיר שמתנגן
+                // ומבקשים מהנגן להתחיל מאותו מיקום בדיוק שממנו הוא עצר
+                controller.setMediaItems(mediaItems, startIndex, currentPos);
+                controller.prepare();
+                
+                // 3. ממשיכים את הניגון באותו המצב
+                if (wasPlaying) {
+                    controller.play();
+                }
+
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("Error updating queue: " + e.getMessage());
+            }
+        });
+    }
+
+
+    @OptIn(markerClass = UnstableApi.class)
+    @PluginMethod
     public void addToQueue(PluginCall call) {
         if (controller == null) {
             call.reject("Media Service not connected yet");

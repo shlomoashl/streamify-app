@@ -1527,8 +1527,14 @@ const App: React.FC = () => {
                 newState = { ...prev, isShuffled: false, queue: originalOrderQueue, currentIndex: newIndex !== -1 ? newIndex : 0, originalQueue: undefined };
             }
             
-            localStorage.setItem('streamify_shuffle', String(newState.isShuffled)); // שומר לזיכרון!
-            audioService.playQueue(newState.queue, newState.currentIndex, playingPlaylistId || undefined);
+            localStorage.setItem('streamify_shuffle', String(newState.isShuffled));
+            
+            // התיקון: במקום לקרוא ל-playQueue שעושה Restart לשיר,
+            // נבדוק אם קיימת פונקציית עדכון שקטה ונקרא לה.
+            if (audioService.updateQueue) {
+                audioService.updateQueue(newState.queue, newState.currentIndex, playingPlaylistId || undefined);
+            }
+            
             saveStateToStorage(newState, playingPlaylistId, 0);
             return newState;
         });
@@ -2148,10 +2154,11 @@ const App: React.FC = () => {
                                 ) : (
                                     <div className="space-y-12 pb-32 px-4">
                                         
-                                        {/* --- חדש: התוצאה המובילה (Top Result) - מופיע רק בטאב 'הכל' --- */}
+                                        {/* --- התוצאה המובילה (Top Result) - מסודרת ואחידה --- */}
                                         {ytMusicFilter === 'all' && searchResults.length > 0 && (
-                                            <section>
-                                                <div className="grid grid-cols-1 md:grid-cols-5 gap-6" dir="rtl">
+                                            <section className="mb-6">
+                                                <h2 className="text-xl font-bold text-white mb-4 px-1">התוצאה הטובה ביותר</h2>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4" dir="rtl">
                                                     
                                                     {/* קופסת התוצאה המובילה (ימין) */}
                                                     {(() => {
@@ -2162,32 +2169,32 @@ const App: React.FC = () => {
                                                         return (
                                                             <div 
                                                                 onClick={() => handleResultClick(topResult)}
-                                                                className="md:col-span-2 bg-gradient-to-b from-white/10 to-white/5 hover:bg-white/10 p-6 rounded-2xl cursor-pointer transition-all group relative flex flex-col justify-end min-h-[240px] border border-white/5"
+                                                                className="bg-white/5 hover:bg-white/10 p-6 rounded-xl cursor-pointer transition-all group relative flex flex-col justify-center min-h-[200px]"
                                                             >
-                                                                <div className={`w-28 h-28 mb-6 shadow-2xl ${isArtist ? 'rounded-full' : 'rounded-xl'} bg-neutral-800 flex items-center justify-center overflow-hidden`}>
+                                                                <div className={`w-24 h-24 mb-4 shadow-xl ${isArtist ? 'rounded-full' : 'rounded-lg'} bg-neutral-800 flex items-center justify-center overflow-hidden border border-white/5`}>
                                                                     {topResult.thumbnail_url ? (
                                                                         <img src={topResult.thumbnail_url} className="w-full h-full object-cover" />
                                                                     ) : (
                                                                         renderSearchIcon(topResult.type)
                                                                     )}
                                                                 </div>
-                                                                <h3 className={`text-3xl font-bold truncate mb-2 ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>
+                                                                <h3 className={`text-2xl font-bold truncate mb-1 ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>
                                                                     {topResult.title}
                                                                 </h3>
                                                                 <div className="flex items-center gap-3 text-sm text-gray-400">
                                                                     {topResult.type !== 'artist' && <span className="truncate">{topResult.author || topResult.channel}</span>}
-                                                                    <span className="bg-black/40 px-3 py-1 rounded-full text-[11px] font-bold uppercase text-white tracking-wide">
+                                                                    <span className="bg-neutral-800 border border-white/10 px-2 py-0.5 rounded text-[11px] font-bold text-white tracking-wide">
                                                                         {topResult.type === 'artist' ? 'אמן' : topResult.type === 'playlist' ? 'פלייליסט' : topResult.type === 'album' ? 'אלבום' : 'שיר'}
                                                                     </span>
                                                                 </div>
                                                                 
-                                                                {/* כפתור Play צף למולטימדיה */}
+                                                                {/* כפתור Play צף */}
                                                                 <div className="absolute bottom-6 left-6 opacity-100 md:opacity-0 md:group-hover:opacity-100 translate-y-0 md:translate-y-2 md:group-hover:translate-y-0 transition-all duration-300">
                                                                     <button 
                                                                         onClick={(e) => { e.stopPropagation(); handleResultClick(topResult); }}
-                                                                        className="w-14 h-14 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-xl hover:scale-105"
+                                                                        className="w-12 h-12 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-lg hover:scale-105"
                                                                     >
-                                                                        <PlayIcon className="w-7 h-7 ml-1" fill />
+                                                                        <PlayIcon className="w-6 h-6 ml-1" fill />
                                                                     </button>
                                                                 </div>
                                                             </div>
@@ -2195,11 +2202,10 @@ const App: React.FC = () => {
                                                     })()}
 
                                                     {/* רשימת 4 השירים הבאים (שמאל) */}
-                                                    <div className="md:col-span-3 flex flex-col gap-2">
-                                                        <h2 className="text-xl font-bold text-white mb-2 px-1">שירים קשורים</h2>
+                                                    <div className="flex flex-col gap-1 justify-between bg-transparent">
                                                         {searchResults
                                                             .filter(r => !r.type || r.type === 'song' || r.type === 'video')
-                                                            .filter(r => r.id !== searchResults[0].id) // מדלג על התוצאה הראשונה שכבר מוצגת בריבוע
+                                                            .filter(r => r.id !== searchResults[0].id)
                                                             .slice(0, 4)
                                                             .map((res) => {
                                                                 const isPlaying = playerState.currentSong?.id === res.id;
@@ -2207,15 +2213,15 @@ const App: React.FC = () => {
                                                                 
                                                                 return (
                                                                     <div key={res.id} onClick={() => handleResultClick(res)} 
-                                                                        className={`flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-xl group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary bg-spotify-primary/10' : 'border-transparent'}`}>
-                                                                        <div className="w-12 h-12 bg-neutral-800 rounded-lg flex items-center justify-center text-gray-400 flex-shrink-0 shadow-md">
-                                                                            <MusicIcon className={`w-6 h-6 ${isPlaying ? 'text-spotify-primary' : ''}`} />
+                                                                        className={`flex items-center gap-3 p-2.5 bg-white/5 hover:bg-white/10 rounded-lg group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary/50 bg-spotify-primary/5' : 'border-transparent'}`}>
+                                                                        <div className="w-11 h-11 bg-neutral-800 rounded flex items-center justify-center text-gray-400 flex-shrink-0 shadow-sm border border-white/5">
+                                                                            <MusicIcon className={`w-5 h-5 ${isPlaying ? 'text-spotify-primary' : ''}`} />
                                                                         </div>
                                                                         <div className="flex-1 min-w-0 text-right">
-                                                                            <div className={`text-[15px] font-bold truncate leading-tight ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
-                                                                            <div className="text-[13px] text-gray-400 truncate mt-0.5">{res.author}</div>
+                                                                            <div className={`text-[14px] font-bold truncate leading-tight ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
+                                                                            <div className="text-[12px] text-gray-400 truncate mt-0.5">{res.author}</div>
                                                                         </div>
-                                                                        <div className="flex items-center gap-2">
+                                                                        <div className="flex items-center gap-1">
                                                                             <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} className={`p-2 transition-all ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-500 hover:text-white'}`}>
                                                                                 <HeartIcon className="w-5 h-5" filled={isLiked} />
                                                                            </button>
@@ -2228,48 +2234,47 @@ const App: React.FC = () => {
                                             </section>
                                         )}
 
-                                        {/* 1. שירים (מציג את שאר השירים שלא נכנסו למעלה) */}
+                                        {/* 1. שירים (ממשיך ברצף אחיד) */}
                                         {(() => {
                                             const songsToDisplay = searchResults
                                                 .filter(r => !r.type || r.type === 'song' || r.type === 'video')
                                                 .filter((r) => {
                                                     if (ytMusicFilter !== 'all') return true;
-                                                    // סינון שירים שכבר הוצגו ב"תוצאה המובילה"
-                                                    const topResultId = searchResults[0].id;
+                                                    const topResultId = searchResults[0]?.id;
                                                     if (r.id === topResultId) return false;
                                                     const allSongsWithoutTop = searchResults.filter(s => !s.type || s.type === 'song' || s.type === 'video').filter(s => s.id !== topResultId);
                                                     const idx = allSongsWithoutTop.findIndex(s => s.id === r.id);
-                                                    return idx >= 4; // מציג רק מהשיר ה-5 ומעלה
+                                                    return idx >= 4;
                                                 });
 
                                             if (songsToDisplay.length === 0) return null;
 
                                             return (
-                                                <section>
+                                                <section className="mb-8">
                                                     {ytMusicFilter !== 'all' && <h2 className="text-xl font-bold text-white mb-4 px-1">שירים</h2>}
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                                         {songsToDisplay.map((res) => {
                                                             const isPlaying = playerState.currentSong?.id === res.id;
                                                             const isLiked = likedSongsPlaylist?.songs.some(s => s.id === res.id);
                                                             
                                                             return (
                                                                 <div key={res.id} onClick={() => handleResultClick(res)} 
-                                                                    className={`flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-xl group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary bg-spotify-primary/10' : 'border-white/5'}`}>
-                                                                    <div className="w-12 h-12 bg-neutral-800 rounded-lg flex items-center justify-center text-gray-400 flex-shrink-0 shadow-lg">
-                                                                        <MusicIcon className={`w-6 h-6 ${isPlaying ? 'text-spotify-primary' : ''}`} />
+                                                                    className={`flex items-center gap-3 p-2.5 bg-white/5 hover:bg-white/10 rounded-lg group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary/50 bg-spotify-primary/5' : 'border-transparent'}`}>
+                                                                    <div className="w-11 h-11 bg-neutral-800 rounded flex items-center justify-center text-gray-400 flex-shrink-0 shadow-sm border border-white/5">
+                                                                        <MusicIcon className={`w-5 h-5 ${isPlaying ? 'text-spotify-primary' : ''}`} />
                                                                     </div>
                                                                     <div className="flex-1 min-w-0 text-right" dir="rtl">
-                                                                        <div className={`text-[15px] font-bold truncate leading-tight ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
-                                                                        <div className="text-[13px] text-gray-400 truncate mt-1">{res.author}</div>
+                                                                        <div className={`text-[14px] font-bold truncate leading-tight ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
+                                                                        <div className="text-[12px] text-gray-400 truncate mt-0.5">{res.author}</div>
                                                                     </div>
-                                                                    <div className="flex items-center gap-2">
+                                                                    <div className="flex items-center gap-1">
                                                                         <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} 
                                                                             className={`p-2 transition-all ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-500 hover:text-white'}`}>
-                                                                            <HeartIcon className="w-6 h-6" filled={isLiked} />
+                                                                            <HeartIcon className="w-5 h-5" filled={isLiked} />
                                                                         </button>
                                                                         <button onClick={(e) => { e.stopPropagation(); handleAddToPlaylistClick(e, res); }} 
                                                                             className="p-2 text-gray-400 hover:text-white">
-                                                                            <PlusIcon className="w-6 h-6" />
+                                                                            <PlusIcon className="w-5 h-5" />
                                                                         </button>
                                                                     </div>
                                                                 </div>
@@ -2282,16 +2287,16 @@ const App: React.FC = () => {
 
                                         {/* 2. פלייליסטים ... */}
                                         {searchResults.filter(r => r.type === 'playlist').length > 0 && (
-                                            <section>
+                                            <section className="mb-8">
                                                 <h2 className="text-xl font-bold text-white mb-4 px-1">פלייליסטים</h2>
                                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-6 px-1">
                                                     {searchResults.filter(r => r.type === 'playlist').map((res) => (
                                                         <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col cursor-pointer group text-right" dir="rtl">
-                                                            <div className="aspect-square mb-4 rounded-xl flex items-center justify-center border border-white/5 shadow-2xl transition-all group-hover:bg-white/10 bg-gradient-to-br from-[#282828] to-[#121212]">
-                                                                <PlaylistIcon className="w-14 h-14 text-gray-300" />
+                                                            <div className="aspect-square mb-3 rounded-lg flex items-center justify-center border border-white/5 transition-all group-hover:bg-white/10 bg-neutral-800">
+                                                                <PlaylistIcon className="w-12 h-12 text-gray-400" />
                                                             </div>
-                                                            <div className="text-[15px] font-bold text-white line-clamp-2 leading-snug px-1 h-11">{res.title}</div>
-                                                            <div className="text-[13px] text-gray-400 truncate px-1 mt-1">פלייליסט</div>
+                                                            <div className="text-[14px] font-bold text-white line-clamp-2 leading-snug px-1">{res.title}</div>
+                                                            <div className="text-[12px] text-gray-400 truncate px-1 mt-0.5">פלייליסט</div>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -2300,47 +2305,38 @@ const App: React.FC = () => {
 
                                         {/* 3. אמנים ... */}
                                         {searchResults.filter(r => r.type === 'artist').length > 0 && (
-                                            <section>
+                                            <section className="mb-8">
                                                 <h2 className="text-xl font-bold text-white mb-4 px-1">אמנים</h2>
                                                 <div className="flex gap-6 overflow-x-auto no-scrollbar pb-2 px-1">
                                                     {searchResults.filter(r => r.type === 'artist').map((res) => (
-                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col items-center gap-3 min-w-[110px] cursor-pointer group">
-                                                            <div className="w-24 h-24 rounded-full bg-neutral-800 flex items-center justify-center border border-white/10 group-hover:scale-105 transition-transform shadow-2xl overflow-hidden">
-                                                                <ArtistIcon className="w-12 h-12 text-gray-500" />
+                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col items-center gap-2 min-w-[100px] cursor-pointer group">
+                                                            <div className="w-24 h-24 rounded-full bg-neutral-800 flex items-center justify-center border border-white/5 group-hover:bg-neutral-700 transition-colors">
+                                                                <ArtistIcon className="w-10 h-10 text-gray-400" />
                                                             </div>
-                                                            <span className="text-[14px] font-bold text-white text-center line-clamp-2 w-24 leading-snug h-11">{res.title}</span>
+                                                            <span className="text-[14px] font-bold text-white text-center line-clamp-2 w-24 leading-snug">{res.title}</span>
                                                         </div>
                                                     ))}
                                                 </div>
                                             </section>
                                         )}
 
-                                        {/* 4. אלבומים - תקליט בולט וצבעוני יותר לשמש */}
+                                        {/* 4. אלבומים - עיצוב אחיד ונקי */}
                                         {searchResults.filter(r => r.type === 'album').length > 0 && (
-                                            <section>
+                                            <section className="mb-8">
                                                 <h2 className="text-xl font-bold text-white mb-4 px-1">אלבומים</h2>
-                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-8 px-1">
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 px-1">
                                                     {searchResults.filter(r => r.type === 'album').map((res) => (
                                                         <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col items-center cursor-pointer group text-center">
-                                                            <div className="relative w-full aspect-square mb-4 rounded-full bg-gradient-to-br from-gray-600 via-neutral-800 to-black border-[3px] border-gray-500 flex items-center justify-center shadow-[0_8px_30px_rgba(0,0,0,0.6)] group-hover:scale-105 transition-transform duration-300 overflow-hidden">
-                                                                
-                                                                {/* מרכז הדיסק (הלייבל) - עכשיו עם צבע אפור מתכתי קונטרסטי לחלוטין */}
-                                                                <div className="w-[35%] h-[35%] rounded-full border-2 border-gray-400 bg-gradient-to-tr from-gray-700 to-gray-400 flex items-center justify-center z-20 shadow-inner">
-                                                                    <div className="w-3 h-3 rounded-full bg-[#181818] shadow-inner"></div>
+                                                            <div className="relative w-24 h-24 mb-3 rounded-full bg-neutral-800 border-2 border-white/5 flex items-center justify-center group-hover:bg-neutral-700 transition-colors overflow-hidden">
+                                                                {/* קווים פנימיים עדינים למראה של תקליט */}
+                                                                <div className="absolute inset-[25%] rounded-full border border-white/10 pointer-events-none"></div>
+                                                                <div className="w-[35%] h-[35%] rounded-full bg-neutral-700 border border-white/10 flex items-center justify-center z-10">
+                                                                    <div className="w-2 h-2 rounded-full bg-spotify-base"></div>
                                                                 </div>
-                                                                
-                                                                {/* חריצי תקליט עבים ובולטים יותר */}
-                                                                <div className="absolute inset-[18%] rounded-full border border-gray-400/40"></div>
-                                                                <div className="absolute inset-[32%] rounded-full border border-gray-400/25"></div>
-                                                                <div className="absolute inset-[46%] rounded-full border border-gray-400/15"></div>
-                                                                
-                                                                {/* אפקט ברק אלכסוני (Glare) לתחושת ויניל */}
-                                                                <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-transparent rotate-45 pointer-events-none"></div>
-                                                                
-                                                                <AlbumIcon className="absolute w-8 h-8 text-white opacity-40 bottom-4 right-4" />
+                                                                <AlbumIcon className="absolute w-6 h-6 text-white/10 bottom-2 right-2 pointer-events-none" />
                                                             </div>
-                                                            <div className="text-[15px] font-bold text-white line-clamp-2 leading-snug h-11 w-full">{res.title}</div>
-                                                            <div className="text-[13px] text-gray-400 truncate w-full">{res.author}</div>
+                                                            <div className="text-[14px] font-bold text-white line-clamp-2 leading-snug w-full px-1">{res.title}</div>
+                                                            <div className="text-[12px] text-gray-400 truncate w-full px-1 mt-0.5">{res.author}</div>
                                                         </div>
                                                     ))}
                                                 </div>
