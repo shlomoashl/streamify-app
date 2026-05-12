@@ -311,6 +311,7 @@ const App: React.FC = () => {
     const audioInitializedRef = useRef(false);
     const skipLockRef = useRef(false);
 
+    const silenceTimeoutRef = useRef<any>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<YouTubeSearchResult[]>([]);
     const [isSearching, setIsSearching] = useState(false);
@@ -1346,15 +1347,23 @@ const App: React.FC = () => {
     }, [playlistSearchQuery]);
 
     const handleVoiceSearch = async () => {
+        // אם המיקרופון כבר פועל ולחצנו עליו שוב - נסיים ומיד נחפש
+        if (isListening) {
+            if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+            try { await SpeechRecognition.stop(); } catch(e){}
+            setIsListening(false);
+            SpeechRecognition.removeAllListeners();
+            if (searchQuery.trim()) performSearch(searchQuery, false);
+            return;
+        }
+
         try {
-            // 1. בדיקה אם המכשיר תומך בזיהוי קולי
             const { available } = await SpeechRecognition.available();
             if (!available) {
                 alert("חיפוש קולי לא נתמך במכשיר זה.");
                 return;
             }
 
-            // 2. מערכת חכמה לבקשת הרשאות ישירות מתוך האפליקציה
             const permissions = await SpeechRecognition.checkPermissions();
             if (permissions.speechRecognition !== 'granted') {
                 const requested = await SpeechRecognition.requestPermissions();
@@ -1365,29 +1374,42 @@ const App: React.FC = () => {
             }
 
             setIsListening(true);
+            setSearchQuery(""); // מנקה את שורת החיפוש כדי שנתחיל לכתוב בה בזמן אמת
+            
+            // מנקים מאזינים קודמים למקרה שהיו
+            await SpeechRecognition.removeAllListeners();
 
-            // 3. הפעלת מנוע החיפוש ומעבר של התוצאה ישירות למשתנה (הקוד ימתין פה עד שתסיים לדבר)
-            const result = await SpeechRecognition.start({
-                language: "he-IL",
-                maxResults: 1,
-                prompt: "איזה שיר תרצה לשמוע?",
-                partialResults: false, // אנחנו רוצים רק את המשפט הסופי
-                popup: true // החלון של אנדרואיד
+            // מאזין שמקבל את המילים *תוך כדי* הדיבור
+            SpeechRecognition.addListener('partialResults', (data: any) => {
+                if (data.matches && data.matches.length > 0) {
+                    const transcript = data.matches[0];
+                    setSearchQuery(transcript); // מציג את הטקסט בשורת החיפוש בזמן אמת!
+
+                    // בכל פעם שמילה חדשה מזוהה, אנחנו מאפסים את טיימר השקט
+                    if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+
+                    // מגדירים: אם עברו 1.2 שניות מאז המילה האחרונה - סימן שהלקוח סיים
+                    silenceTimeoutRef.current = setTimeout(async () => {
+                        try { await SpeechRecognition.stop(); } catch(e){}
+                        setIsListening(false);
+                        SpeechRecognition.removeAllListeners();
+                        performSearch(transcript, false); // מפעיל את החיפוש מיד!
+                    }, 1200); // 1.2 שניות (Sweet spot) לדיבור שוטף
+                }
             });
 
-            // 4. החלון נסגר, בודקים אם יש תוצאה ומפעילים את החיפוש!
-            if (result && result.matches && result.matches.length > 0) {
-                const transcript = result.matches[0];
-                setSearchQuery(transcript);
-                performSearch(transcript, false);
-            }
+            // מתחילים האזנה - הפעם נסתרת וללא הפופ-אפ האיטי
+            await SpeechRecognition.start({
+                language: "he-IL",
+                maxResults: 1,
+                partialResults: true, // חובה להיות דלוק כדי שנקבל מילים בזמן אמת
+                popup: false // מכבים את הפופ-אפ של אנדרואיד! האפליקציה שלנו מנהלת את זה
+            });
 
         } catch (e) {
-            // יכול לקרות אם הלקוח לחץ על מסך שחור כדי לבטל את ההקלטה באמצע
-            console.error("Voice search cancelled or error:", e);
-        } finally {
-            // מכבה את הבהוב המיקרופון בכל מצב (הצלחה או ביטול)
+            console.error("Voice search error:", e);
             setIsListening(false);
+            SpeechRecognition.removeAllListeners();
         }
     };
 
