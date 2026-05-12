@@ -2154,13 +2154,12 @@ const App: React.FC = () => {
                                 ) : isSearching ? (
                                     <div className="text-center mt-10 opacity-50">טוען...</div>
                                 ) : (
-                                    <div className="space-y-12 pb-32 px-4">
+                                    <div className="space-y-10 pb-32 px-4">
                                         
-                                        {/* --- חדש: התוצאה המובילה (Top Result) - מופיע רק בטאב 'הכל' --- */}
-{/* --- התוצאה המובילה (Top Result) --- */}
+                                        {/* --- התוצאה המובילה (Top Result) --- */}
                                         {ytMusicFilter === 'all' && searchResults.length > 0 && (
-                                            <section className="mb-4">
-                                                <h2 className="text-xl font-bold text-white mb-3 px-1">התוצאה הטובה ביותר</h2>
+                                            <section className="mb-2">
+                                                <h2 className="text-xl font-bold text-white mb-4 px-1">התוצאה הטובה ביותר</h2>
                                                 <div className="grid grid-cols-1 md:grid-cols-5 gap-4" dir="rtl">
                                                     
                                                     {/* קופסת התוצאה המובילה (ימין) */}
@@ -2172,32 +2171,31 @@ const App: React.FC = () => {
                                                         return (
                                                             <div 
                                                                 onClick={() => handleResultClick(topResult)}
-                                                                className="md:col-span-2 bg-white/5 hover:bg-white/10 p-5 rounded-xl cursor-pointer transition-all group relative flex flex-col justify-end min-h-[220px] border border-white/5"
+                                                                className="md:col-span-2 bg-[#181818] hover:bg-[#282828] p-6 rounded-2xl cursor-pointer transition-all group relative flex flex-col justify-center border border-white/5 shadow-lg"
                                                             >
-                                                                <div className={`w-24 h-24 mb-4 shadow-xl ${isArtist ? 'rounded-full' : 'rounded-lg'} bg-[#181818] flex items-center justify-center overflow-hidden border border-white/5`}>
+                                                                <div className={`w-28 h-28 mb-5 shadow-2xl ${isArtist ? 'rounded-full' : 'rounded-xl'} bg-[#282828] flex items-center justify-center overflow-hidden border border-white/5`}>
                                                                     {topResult.thumbnail_url ? (
                                                                         <img src={topResult.thumbnail_url} className="w-full h-full object-cover" />
                                                                     ) : (
                                                                         renderSearchIcon(topResult.type)
                                                                     )}
                                                                 </div>
-                                                                <h3 className={`text-2xl font-bold truncate mb-1 ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>
+                                                                <h3 className={`text-3xl font-bold truncate mb-2 ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>
                                                                     {topResult.title}
                                                                 </h3>
-                                                                <div className="flex items-center gap-2 text-sm text-gray-400">
+                                                                <div className="flex items-center gap-2 text-sm text-gray-400 font-medium">
                                                                     {topResult.type !== 'artist' && <span className="truncate">{topResult.author || topResult.channel}</span>}
-                                                                    <span className="bg-neutral-800 border border-white/10 px-2 py-0.5 rounded text-[11px] font-bold text-white tracking-wide">
+                                                                    <span className="bg-white/10 px-3 py-1 rounded-full text-[12px] font-bold text-white tracking-wide">
                                                                         {topResult.type === 'artist' ? 'אמן' : topResult.type === 'playlist' ? 'פלייליסט' : topResult.type === 'album' ? 'אלבום' : 'שיר'}
                                                                     </span>
                                                                 </div>
                                                                 
-                                                                {/* כפתור Play צף */}
-                                                                <div className="absolute bottom-5 left-5 opacity-100 md:opacity-0 md:group-hover:opacity-100 translate-y-0 md:translate-y-2 md:group-hover:translate-y-0 transition-all duration-300">
+                                                                <div className="absolute bottom-6 left-6">
                                                                     <button 
                                                                         onClick={(e) => { e.stopPropagation(); handleResultClick(topResult); }}
-                                                                        className="w-12 h-12 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-lg hover:scale-105"
+                                                                        className="w-14 h-14 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-xl hover:scale-105 active:scale-95 transition-all"
                                                                     >
-                                                                        <PlayIcon className="w-6 h-6 ml-1" fill />
+                                                                        <PlayIcon className="w-7 h-7 ml-1" fill />
                                                                     </button>
                                                                 </div>
                                                             </div>
@@ -2205,7 +2203,7 @@ const App: React.FC = () => {
                                                     })()}
 
                                                     {/* רשימת 4 השירים הבאים (שמאל) */}
-                                                    <div className="md:col-span-3 flex flex-col gap-1 justify-between bg-transparent">
+                                                    <div className="md:col-span-3 flex flex-col gap-2 bg-transparent">
                                                         {searchResults
                                                             .filter(r => !r.type || r.type === 'song' || r.type === 'video')
                                                             .filter(r => r.id !== searchResults[0].id)
@@ -2216,22 +2214,26 @@ const App: React.FC = () => {
                                                                 
                                                                 return (
                                                                     <div key={res.id} onClick={() => handleResultClick(res)} 
-                                                                        className={`flex items-center gap-3 p-2.5 bg-white/5 hover:bg-white/10 rounded-lg group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary/50 bg-spotify-primary/5' : 'border-transparent'}`}>
-                                                                        <div className="w-12 h-12 bg-[#181818] rounded flex items-center justify-center text-gray-400 flex-shrink-0 shadow-sm border border-white/5 overflow-hidden">
+                                                                        className={`flex items-center gap-3 p-3 hover:bg-white/10 rounded-xl group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary/30 bg-spotify-primary/5' : 'border-transparent'}`}>
+                                                                        <div className="w-12 h-12 bg-[#282828] rounded-md flex items-center justify-center text-gray-400 flex-shrink-0 shadow-md overflow-hidden relative">
                                                                             {res.thumbnail_url ? (
                                                                                 <img src={res.thumbnail_url} className="w-full h-full object-cover" />
                                                                             ) : (
                                                                                 <MusicIcon className={`w-6 h-6 ${isPlaying ? 'text-spotify-primary' : ''}`} />
                                                                             )}
+                                                                            {isPlaying && <div className="absolute inset-0 bg-black/40 flex items-center justify-center"><MusicIcon className="w-5 h-5 text-spotify-primary animate-pulse"/></div>}
                                                                         </div>
                                                                         <div className="flex-1 min-w-0 text-right">
                                                                             <div className={`text-[15px] font-bold truncate leading-tight ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
                                                                             <div className="text-[13px] text-gray-400 truncate mt-0.5">{res.author}</div>
                                                                         </div>
-                                                                        <div className="flex items-center gap-1">
-                                                                            <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} className={`p-2 transition-all ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-500 hover:text-white'}`}>
+                                                                        <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} className={`p-2 transition-all hover:scale-110 ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-400 hover:text-white'}`}>
                                                                                 <HeartIcon className="w-5 h-5" filled={isLiked} />
-                                                                           </button>
+                                                                            </button>
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleAddToPlaylistClick(e, res); }} className="p-2 text-gray-400 hover:text-white transition-all hover:scale-110">
+                                                                                <PlusIcon className="w-5 h-5" />
+                                                                            </button>
                                                                         </div>
                                                                     </div>
                                                                 );
@@ -2241,7 +2243,7 @@ const App: React.FC = () => {
                                             </section>
                                         )}
 
-                                        {/* 1. שירים (ממשיך ברצף אחיד - mb-4) */}
+                                        {/* שירים נוספים */}
                                         {(() => {
                                             const songsToDisplay = searchResults
                                                 .filter(r => !r.type || r.type === 'song' || r.type === 'video')
@@ -2258,33 +2260,34 @@ const App: React.FC = () => {
 
                                             return (
                                                 <section className="mb-4">
-                                                    {ytMusicFilter !== 'all' && <h2 className="text-xl font-bold text-white mb-3 px-1">שירים</h2>}
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                    {ytMusicFilter !== 'all' && <h2 className="text-xl font-bold text-white mb-4 px-1">שירים</h2>}
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
                                                         {songsToDisplay.map((res) => {
                                                             const isPlaying = playerState.currentSong?.id === res.id;
                                                             const isLiked = likedSongsPlaylist?.songs.some(s => s.id === res.id);
                                                             
                                                             return (
                                                                 <div key={res.id} onClick={() => handleResultClick(res)} 
-                                                                    className={`flex items-center gap-3 p-2.5 bg-white/5 hover:bg-white/10 rounded-lg group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary/50 bg-spotify-primary/5' : 'border-transparent'}`}>
-                                                                    <div className="w-12 h-12 bg-[#181818] rounded flex items-center justify-center text-gray-400 flex-shrink-0 shadow-sm border border-white/5 overflow-hidden">
+                                                                    className={`flex items-center gap-3 p-3 hover:bg-white/10 rounded-xl group cursor-pointer transition-all border ${isPlaying ? 'border-spotify-primary/30 bg-spotify-primary/5' : 'border-transparent'}`}>
+                                                                    <div className="w-12 h-12 bg-[#282828] rounded-md flex items-center justify-center text-gray-400 flex-shrink-0 shadow-md overflow-hidden relative">
                                                                         {res.thumbnail_url ? (
                                                                             <img src={res.thumbnail_url} className="w-full h-full object-cover" />
                                                                         ) : (
                                                                             <MusicIcon className={`w-6 h-6 ${isPlaying ? 'text-spotify-primary' : ''}`} />
                                                                         )}
+                                                                        {isPlaying && <div className="absolute inset-0 bg-black/40 flex items-center justify-center"><MusicIcon className="w-5 h-5 text-spotify-primary animate-pulse"/></div>}
                                                                     </div>
                                                                     <div className="flex-1 min-w-0 text-right" dir="rtl">
                                                                         <div className={`text-[15px] font-bold truncate leading-tight ${isPlaying ? 'text-spotify-primary' : 'text-white'}`}>{res.title}</div>
                                                                         <div className="text-[13px] text-gray-400 truncate mt-0.5">{res.author}</div>
                                                                     </div>
-                                                                    <div className="flex items-center gap-1">
+                                                                    <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
                                                                         <button onClick={(e) => { e.stopPropagation(); handleToggleLike(res); }} 
-                                                                            className={`p-2 transition-all ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-500 hover:text-white'}`}>
+                                                                            className={`p-2 transition-all hover:scale-110 ${isLiked ? 'text-[#ff4b4b]' : 'text-gray-400 hover:text-white'}`}>
                                                                             <HeartIcon className="w-5 h-5" filled={isLiked} />
                                                                         </button>
                                                                         <button onClick={(e) => { e.stopPropagation(); handleAddToPlaylistClick(e, res); }} 
-                                                                            className="p-2 text-gray-400 hover:text-white">
+                                                                            className="p-2 text-gray-400 hover:text-white transition-all hover:scale-110">
                                                                             <PlusIcon className="w-5 h-5" />
                                                                         </button>
                                                                     </div>
@@ -2296,92 +2299,52 @@ const App: React.FC = () => {
                                             );
                                         })()}
 
-                                        {/* 2. פלייליסטים - עיצוב אחיד ריבוע */}
-                                        {searchResults.filter(r => r.type === 'playlist').length > 0 && (
-                                            <section className="mb-4">
-                                                <h2 className="text-xl font-bold text-white mb-3 px-1">פלייליסטים</h2>
-                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 px-1">
-                                                    {searchResults.filter(r => r.type === 'playlist').map((res) => (
-                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col cursor-pointer group text-right" dir="rtl">
-                                                            <div className="aspect-square mb-3 rounded-lg flex items-center justify-center border border-white/5 transition-all group-hover:bg-white/10 bg-[#181818] overflow-hidden">
-                                                                {res.thumbnail_url ? (
-                                                                    <img src={res.thumbnail_url} className="w-full h-full object-cover" />
-                                                                ) : (
-                                                                    <PlaylistIcon className="w-12 h-12 text-gray-400" />
-                                                                )}
-                                                            </div>
-                                                            <div className="text-[14px] font-bold text-white line-clamp-2 leading-snug px-1 h-10">{res.title}</div>
-                                                            <div className="text-[12px] text-gray-400 truncate px-1 mt-0.5">פלייליסט</div>
+                                        {/* קטגוריות נוספות - עיצוב קלפים אחיד */}
+                                        {(() => {
+                                            const renderGridSection = (title, type, items) => {
+                                                if (items.length === 0) return null;
+                                                const isCircle = type === 'artist' || type === 'album';
+                                                
+                                                return (
+                                                    <section className="mb-6">
+                                                        <h2 className="text-xl font-bold text-white mb-4 px-1">{title}</h2>
+                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 px-1">
+                                                            {items.map((res) => (
+                                                                <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col p-4 bg-[#181818] hover:bg-[#282828] rounded-xl cursor-pointer transition-all relative group text-right border border-transparent hover:border-white/5" dir="rtl">
+                                                                    <div className={`relative w-full aspect-square mb-4 ${isCircle ? 'rounded-full' : 'rounded-lg'} bg-[#282828] shadow-inner flex items-center justify-center overflow-hidden border border-white/5`}>
+                                                                        {res.thumbnail_url ? (
+                                                                            <img src={res.thumbnail_url} className="w-full h-full object-cover" />
+                                                                        ) : (
+                                                                            renderSearchIcon(res.type)
+                                                                        )}
+                                                                        
+                                                                        {type !== 'artist' && (
+                                                                            <button 
+                                                                                onClick={(e) => { e.stopPropagation(); handleResultClick(res); }}
+                                                                                className="absolute bottom-2 left-2 w-10 h-10 bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-xl hover:scale-110 active:scale-95 transition-transform"
+                                                                            >
+                                                                                <PlayIcon className="w-5 h-5 ml-0.5" fill />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="text-[15px] font-bold text-white truncate w-full px-1">{res.title}</div>
+                                                                    <div className="text-[13px] text-gray-400 truncate w-full px-1 mt-1">{res.author || (type === 'playlist' ? 'פלייליסט' : '')}</div>
+                                                                </div>
+                                                            ))}
                                                         </div>
-                                                    ))}
-                                                </div>
-                                            </section>
-                                        )}
+                                                    </section>
+                                                );
+                                            };
 
-                                        {/* 3. אמנים - עיצוב אחיד עגול */}
-                                        {searchResults.filter(r => r.type === 'artist').length > 0 && (
-                                            <section className="mb-4">
-                                                <h2 className="text-xl font-bold text-white mb-3 px-1">אמנים</h2>
-                                                <div className="flex gap-6 overflow-x-auto no-scrollbar pb-2 px-1">
-                                                    {searchResults.filter(r => r.type === 'artist').map((res) => (
-                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col items-center gap-2 min-w-[100px] cursor-pointer group">
-                                                            <div className="w-24 h-24 rounded-full bg-[#181818] flex items-center justify-center border border-white/5 group-hover:bg-white/10 transition-colors overflow-hidden">
-                                                                {res.thumbnail_url ? (
-                                                                    <img src={res.thumbnail_url} className="w-full h-full object-cover" />
-                                                                ) : (
-                                                                    <ArtistIcon className="w-10 h-10 text-gray-400" />
-                                                                )}
-                                                            </div>
-                                                            <span className="text-[14px] font-bold text-white text-center line-clamp-2 w-24 leading-snug h-10">{res.title}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </section>
-                                        )}
-
-                                        {/* 4. אלבומים - עיצוב אחיד עגול */}
-                                        {searchResults.filter(r => r.type === 'album').length > 0 && (
-                                            <section className="mb-4">
-                                                <h2 className="text-xl font-bold text-white mb-3 px-1">אלבומים</h2>
-                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 px-1">
-                                                    {searchResults.filter(r => r.type === 'album').map((res) => (
-                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col items-center cursor-pointer group text-center">
-                                                            <div className="relative w-24 h-24 mb-3 rounded-full bg-[#181818] border border-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors overflow-hidden">
-                                                                {res.thumbnail_url ? (
-                                                                    <img src={res.thumbnail_url} className="w-full h-full object-cover" />
-                                                                ) : (
-                                                                    <AlbumIcon className="w-10 h-10 text-gray-400" />
-                                                                )}
-                                                            </div>
-                                                            <div className="text-[14px] font-bold text-white line-clamp-2 leading-snug w-full px-1 h-10">{res.title}</div>
-                                                            <div className="text-[12px] text-gray-400 truncate w-full px-1 mt-0.5">{res.author}</div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </section>
-                                        )}
-                                        
-                                        {/* 5. פודקאסטים - עיצוב אחיד ריבוע */}
-                                        {searchResults.filter(r => r.type === 'podcast').length > 0 && (
-                                            <section className="mb-4">
-                                                <h2 className="text-xl font-bold text-white mb-3 px-1">פודקאסטים</h2>
-                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 px-1">
-                                                    {searchResults.filter(r => r.type === 'podcast').map((res) => (
-                                                        <div key={res.id} onClick={() => handleResultClick(res)} className="flex flex-col cursor-pointer group text-right" dir="rtl">
-                                                            <div className="aspect-square mb-3 rounded-lg flex items-center justify-center border border-white/5 transition-all group-hover:bg-white/10 bg-[#181818] overflow-hidden">
-                                                                {res.thumbnail_url ? (
-                                                                    <img src={res.thumbnail_url} className="w-full h-full object-cover" />
-                                                                ) : (
-                                                                    <PodcastIcon className="w-12 h-12 text-gray-400" />
-                                                                )}
-                                                            </div>
-                                                            <div className="text-[14px] font-bold text-white line-clamp-2 leading-snug px-1 h-10">{res.title}</div>
-                                                            <div className="text-[12px] text-gray-400 truncate px-1 mt-0.5">{res.author}</div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </section>
-                                        )}
+                                            return (
+                                                <>
+                                                    {renderGridSection('פלייליסטים', 'playlist', searchResults.filter(r => r.type === 'playlist' || r.type === 'spotify_playlist'))}
+                                                    {renderGridSection('אמנים', 'artist', searchResults.filter(r => r.type === 'artist'))}
+                                                    {renderGridSection('אלבומים', 'album', searchResults.filter(r => r.type === 'album'))}
+                                                    {renderGridSection('פודקאסטים', 'podcast', searchResults.filter(r => r.type === 'podcast'))}
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                 )}                            
                             </div>
