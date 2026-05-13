@@ -1114,7 +1114,10 @@ const App: React.FC = () => {
         if (selectedPlaylist && selectedPlaylist.id === playlistId) {
             setSelectedPlaylist(updatedPlaylist);
         }
-        
+        if (updatedPlaylist.isLikedSongs) {
+            setLikedSongsPlaylist(updatedPlaylist);
+            storageService.saveData('streamify_cache_liked', updatedPlaylist);
+        }        
         setShowPlaylistSelector(false);
         setSongsToAdd([]);
 
@@ -1750,7 +1753,7 @@ const App: React.FC = () => {
 
         // 1. טיפול בשירים וסרטונים
         if (!result.type || result.type === 'song' || result.type === 'video') { 
-            // -- תוספת: עצירה אם השיר כבר מנגן --
+            // אם השיר כבר מנגן - לחיצה תעצור/תפעיל אותו (UX)
             if (playerState.currentSong?.id === result.id) {
                 togglePlayPause();
                 return;
@@ -1758,21 +1761,21 @@ const App: React.FC = () => {
 
             const songQueue = searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').map(r => searchResultToPlaylistItem(r, 'search')); 
             const clickedSongIndex = songQueue.findIndex(s => s.id === result.id); 
-            if (clickedSongIndex !== -1) handlePlaySong(songQueue[clickedSongIndex], songQueue, clickedSongIndex, false); 
+            
+            // המפתח לתיקון: אנחנו שולחים 'temp-search' כזהות הפלייליסט
+            if (clickedSongIndex !== -1) handlePlaySong(songQueue[clickedSongIndex], songQueue, clickedSongIndex, false, 'temp-search'); 
             return; 
         }
 
         if (result.type === 'spotify_playlist') { handleSpotifyImport(result.id); return; }
         
-        // 2. טיפול במיכלים (אמן, אלבום, פלייליסט, ערוץ)
+        // 2. טיפול באמנים/אלבומים וכו'
         setIsSearching(true); 
         setGlobalLoading("טוען...");
-        
         try { 
             const browseType = result.type;
             const cleanBase = YOUTUBE_API_BASE.replace(/\/$/, "");
             const finalUrl = `${cleanBase}/ytmusic-browse/${result.id}?type=${browseType}`;
-
             const res = await fetch(finalUrl); 
             const data = await res.json();
 
@@ -1787,11 +1790,9 @@ const App: React.FC = () => {
                 }; 
                 setSelectedPlaylist(tempPlaylist); 
                 setActiveTab('playlist'); 
-            } else {
-                throw new Error("No results from server");
             }
         } catch (err) { 
-            setConfirmModal({ isOpen: true, title: "שגיאה", message: "שגיאה בטעינת תוכן האמן", onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true }); 
+            setConfirmModal({ isOpen: true, title: "שגיאה", message: "שגיאה בטעינת התוכן", onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true }); 
         } finally { 
             setIsSearching(false); 
             setGlobalLoading(null); 
@@ -1799,29 +1800,30 @@ const App: React.FC = () => {
     };
 
     const handleDirectPlay = async (e: React.MouseEvent, result: YouTubeSearchResult) => {
-        e.stopPropagation(); // מונע את פתיחת הפלייליסט/אלבום (לחיצה על הקלף)
+        e.stopPropagation(); 
         
-        // -- תוספת: בדיקה אם הפריט הספציפי הזה כבר מנגן --
         const isSong = !result.type || result.type === 'song' || result.type === 'video';
+        // בודק אם הפריט הזה (שיר או אלבום) כבר מנגן כרגע
         const isCurrentlyActive = isSong 
             ? playerState.currentSong?.id === result.id 
             : playingPlaylistId === `temp-${result.id}`;
 
         if (isCurrentlyActive) {
-            togglePlayPause(); // אם מנגן, עושים פאוז ויוצאים!
+            togglePlayPause();
             return;
         }
         
-        // אם זה שיר בודד (במקרה של התוצאה המובילה)
         if (isSong) {
             const songQueue = searchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').map(r => searchResultToPlaylistItem(r, 'search'));
             const clickedSongIndex = songQueue.findIndex(s => s.id === result.id);
-            if (clickedSongIndex !== -1) handlePlaySong(songQueue[clickedSongIndex], songQueue, clickedSongIndex, false);
+            // שולחים 'temp-search' כדי שהתור יישמר בזיכרון המכשיר
+            if (clickedSongIndex !== -1) handlePlaySong(songQueue[clickedSongIndex], songQueue, clickedSongIndex, false, 'temp-search');
             return;
         }
 
         if (result.type === 'spotify_playlist') { handleSpotifyImport(result.id); return; }
         
+        setGlobalLoading("מתחיל לנגן...");
         try {
             const cleanBase = YOUTUBE_API_BASE.replace(/\/$/, "");
             const finalUrl = `${cleanBase}/ytmusic-browse/${result.id}?type=${result.type}`;
@@ -1831,24 +1833,19 @@ const App: React.FC = () => {
             if (data.success && data.results && data.results.length > 0) {
                 const tracks = data.results.map((r: any) => searchResultToPlaylistItem(r, 'temp'));
                 const tempPlaylistId = `temp-${result.id}`;
-                
-                // מכבד את מצב השאפל של הלקוח
                 if (playerState.isShuffled) {
                     const randomStartIdx = Math.floor(Math.random() * tracks.length);
                     handlePlaySong(tracks[randomStartIdx], tracks, randomStartIdx, true, tempPlaylistId);
                 } else {
                     handlePlaySong(tracks[0], tracks, 0, true, tempPlaylistId);
                 }
-            } else {
-                setConfirmModal({ isOpen: true, title: "שגיאה", message: "לא נמצאו שירים לניגון", onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true });
             }
         } catch (err) {
-            setConfirmModal({ isOpen: true, title: "שגיאה", message: "שגיאה בטעינת השירים", onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true });
+            setConfirmModal({ isOpen: true, title: "שגיאה", message: "שגיאה בנגינה", onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true });
         } finally {
             setGlobalLoading(null);
         }
     };
-
 
     // Check if we need to load external content when opening a playlist
     useEffect(() => {
