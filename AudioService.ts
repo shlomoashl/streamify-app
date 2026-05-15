@@ -488,6 +488,7 @@ class AudioService {
                 artist: item.author,
                 artwork: [{ src: item.thumbnail || '', sizes: '512x512', type: 'image/jpeg' }]
             });
+            navigator.mediaSession.playbackState = 'playing';
         }
 
         /**
@@ -572,6 +573,9 @@ class AudioService {
             await StreamifyMedia.pause();
         } else {
             this.webAudio?.pause();
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused';
+            }    
         }
     }
 
@@ -580,6 +584,9 @@ class AudioService {
             await StreamifyMedia.resume();
         } else {
             this.safePlay();
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'playing';
+            }            
         }
     }
 
