@@ -703,19 +703,10 @@ const App: React.FC = () => {
     const triggerAutoPlay = async () => {
         if (audioInitializedRef.current) return;
         if (!playerState.currentSong) return;
-        console.log(`Auto-play attempt (5s delay)...`);
+        console.log(`Auto-play attempt...`);
         try {
             setPlayerState(prev => ({ ...prev, isPlaying: true }));
-            await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);
-            
-            // --- דילוג שקט לזמן השמור ---
-            if (initialSeekTimeRef.current > 0) {
-                setTimeout(() => {
-                    audioService.seek(initialSeekTimeRef.current);
-                    initialSeekTimeRef.current = 0; // איפוס אחרי דילוג
-                }, 800); // 800ms נותן לנגן זמן לטעון את הקובץ לפני הדילוג
-            }
-            
+            await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);            
             audioInitializedRef.current = true;
         } catch (e) {
             console.error(`Auto-play failed:`, e);
@@ -1695,20 +1686,10 @@ const App: React.FC = () => {
         if (playerState.isPlaying) { 
             audioService.pause(); 
             setPlayerState(p => ({ ...p, isPlaying: false })); 
-            // שומר את הזמן המדויק כשהמשתמש עושה פאוז!
             saveStateToStorage(playerState, playingPlaylistId, currentTimeRef.current);
         } else {
             if (!audioInitializedRef.current && playerState.currentSong) { 
-                audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined); 
-                
-                // --- דילוג שקט לזמן השמור ---
-                if (initialSeekTimeRef.current > 0) {
-                    setTimeout(() => {
-                        audioService.seek(initialSeekTimeRef.current);
-                        initialSeekTimeRef.current = 0;
-                    }, 800);
-                }
-                
+                audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);                 
                 audioInitializedRef.current = true; 
                 setPlayerState(p => ({ ...p, isPlaying: true })); 
             } else { 
@@ -1760,7 +1741,18 @@ const App: React.FC = () => {
                 saveStateToStorage(latestPlayerStateRef.current, latestPlaylistIdRef.current, currentTimeRef.current);
             }
         });
-        const timeListener = audioService.addListener('timeUpdate', (data: any) => { currentTimeRef.current = data.currentTime; });
+        const timeListener = audioService.addListener('timeUpdate', (data: any) => { 
+            currentTimeRef.current = data.currentTime; 
+            
+            // --- דילוג חכם מבוסס האזנה (מותאם למערכות מולטימדיה) ---
+            // רק כשהנגן מתחיל באמת להריץ את השיר (הזמן עבר את ה-0.1 שניות בגלל שהטעינה הסתיימה), אנחנו קופצים
+            if (initialSeekTimeRef.current > 0 && data.currentTime > 0.1) {
+                const targetTime = initialSeekTimeRef.current;
+                initialSeekTimeRef.current = 0; // איפוס מיידי למניעת לולאה אין-סופית
+                console.log(`[App] Media loaded natively. Seeking silently to ${targetTime}s`);
+                audioService.seek(targetTime);
+            }
+        });
         const stateListener = audioService.addListener('stateChange', (data: any) => { setPlayerState(prev => ({ ...prev, isPlaying: data.isPlaying })); });
         const endListener = audioService.addListener('ended', () => { setPlayerState(prev => ({ ...prev, isPlaying: false })); });
         const transitionListener = audioService.addListener('itemTransition', (data: any) => {
