@@ -23,11 +23,12 @@ interface PlayerProps {
     onShuffle: () => void;
     onToggleExpand: () => void;
     onSeek: (time: number) => void;
+    onRemoveCurrentSong?: () => void;
 }
 
 const Player: React.FC<PlayerProps> = ({
     playerState, onPlayPause, onNext, onPrev, onShuffle, 
-    onToggleExpand, onSeek
+    onToggleExpand, onSeek, onRemoveCurrentSong
 }) => {
     const { currentSong, isPlaying, isExpanded, isShuffled } = playerState;
     
@@ -155,8 +156,19 @@ const Player: React.FC<PlayerProps> = ({
         >
             <div className="flex items-center gap-3 flex-1 min-w-0">
                 <Artwork />
-                <div className="min-w-0">
-                    <div className={`font-semibold text-sm truncate ${isDisabled ? 'text-gray-500' : 'text-white'}`}>{displaySong.title}</div>
+                <div className="min-w-0 flex-1 relative">
+                    <div 
+                        className={`font-semibold text-sm truncate ${isDisabled ? 'text-gray-500' : 'text-white hover:text-red-400'}`}
+                        onClick={(e) => {
+                            if (isDisabled) return;
+                            e.stopPropagation();
+                            if (onRemoveCurrentSong) onRemoveCurrentSong();
+                        }}
+                        style={{ cursor: isDisabled ? 'default' : 'pointer' }}
+                        title={isDisabled ? "" : "לחץ להסרה מרשימת ההשמעה"}
+                    >
+                        {displaySong.title}
+                    </div>
                     <div className="text-xs text-gray-500 truncate">{displaySong.author}</div>
                 </div>
             </div>

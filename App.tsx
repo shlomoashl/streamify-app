@@ -310,6 +310,17 @@ const App: React.FC = () => {
 
     const audioInitializedRef = useRef(false);
     const skipLockRef = useRef(false);
+    // --- ניהול זמן לדילוג שקט (Resume Playback) ---
+    const currentTimeRef = useRef<number>(0);
+    const initialSeekTimeRef = useRef<number>(0);
+    const latestPlayerStateRef = useRef(playerState);
+    const latestPlaylistIdRef = useRef(playingPlaylistId);
+
+    // שומר עותק מעודכן של הסטייט עבור מאזיני הרקע (כמו סגירת אפליקציה)
+    useEffect(() => {
+        latestPlayerStateRef.current = playerState;
+        latestPlaylistIdRef.current = playingPlaylistId;
+    }, [playerState, playingPlaylistId]);
 
     const silenceTimeoutRef = useRef<any>(null);
     const [searchQuery, setSearchQuery] = useState('');
@@ -470,6 +481,10 @@ const App: React.FC = () => {
                 // Load saved player state early to get shuffle preference
                 const savedPlayerState = await storageService.loadData<any>('streamify_player_state', null);
                 const savedIsShuffled = savedPlayerState?.isShuffled || false;
+                // משיכת השנייה המדויקת שבה הלקוח עצר
+                if (savedPlayerState?.savedTime) {
+                    initialSeekTimeRef.current = savedPlayerState.savedTime;
+                }
 
                 // Player State - HYBRID STRATEGY
                 // 1. Try to get real-time state from Native (if available) - this is the "Source of Truth" for what actually played last
@@ -659,11 +674,31 @@ const App: React.FC = () => {
     }, [playlistViewMode]);
 
     // שמירה אוטומטית של מצב הנגן לזיכרון המקומי בכל פעם שהשיר, התור או השאפל משתנים
+    const saveStateToStorage = (state: PlayerState, currentPlaylistId: string | null, currentTimeVal: number) => {
+        if (!stateLoadedRef.current) return;
+        
+        // כאן אנחנו כבר לא שמים 0, אלא את הזמן האמיתי שנשלח
+        const stateToSave = { ...state, savedTime: currentTimeVal, playingPlaylistId: currentPlaylistId };
+        delete (stateToSave as any).originalQueue;
+        storageService.saveData('streamify_player_state', stateToSave);
+    };
+
+    // 1. שמירה בעת החלפת שיר (מאפס את הזמן)
     useEffect(() => {
         if (stateLoadedRef.current && playerState.currentSong) {
             saveStateToStorage(playerState, playingPlaylistId, 0);
         }
     }, [playerState.currentSong?.id, playerState.currentIndex, playerState.isShuffled, playingPlaylistId]);
+
+    // 2. שמירה מחזורית כל 10 שניות למניעת איבוד התקדמות
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (playerState.isPlaying && stateLoadedRef.current && playerState.currentSong) {
+                saveStateToStorage(playerState, playingPlaylistId, currentTimeRef.current);
+            }
+        }, 10000);
+        return () => clearInterval(interval);
+    }, [playerState, playingPlaylistId]);
 
     const triggerAutoPlay = async () => {
         if (audioInitializedRef.current) return;
@@ -671,8 +706,16 @@ const App: React.FC = () => {
         console.log(`Auto-play attempt (5s delay)...`);
         try {
             setPlayerState(prev => ({ ...prev, isPlaying: true }));
-            // Pass contextId (playlistId) if available
             await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);
+            
+            // --- דילוג שקט לזמן השמור ---
+            if (initialSeekTimeRef.current > 0) {
+                setTimeout(() => {
+                    audioService.seek(initialSeekTimeRef.current);
+                    initialSeekTimeRef.current = 0; // איפוס אחרי דילוג
+                }, 800); // 800ms נותן לנגן זמן לטעון את הקובץ לפני הדילוג
+            }
+            
             audioInitializedRef.current = true;
         } catch (e) {
             console.error(`Auto-play failed:`, e);
@@ -703,14 +746,6 @@ const App: React.FC = () => {
         }
         prevOnlineStatus.current = isOnline;
     }, [isOnline, currentUser]);
-
-    const saveStateToStorage = (state: PlayerState, currentPlaylistId: string | null, currentTimeVal: number) => {
-        if (!stateLoadedRef.current) return; // Don't save if we haven't loaded initial state yet
-        
-        const stateToSave = { ...state, savedTime: 0, playingPlaylistId: currentPlaylistId };
-        delete (stateToSave as any).originalQueue;
-        storageService.saveData('streamify_player_state', stateToSave);
-    };
 
     useEffect(() => {
         if (selectedPlaylist && !selectedPlaylist.id.startsWith('temp-')) {
@@ -1508,6 +1543,7 @@ const App: React.FC = () => {
     
     const handlePlaySong = (song: PlaylistItem, queue: PlaylistItem[], index: number, isPlaylistStartAction: boolean = false, playlistId: string | null = null) => {
         audioInitializedRef.current = true;
+        initialSeekTimeRef.current = 0;
         let finalQueue = [...queue]; let finalIndex = index; let finalOriginalQueue: PlaylistItem[] | undefined = undefined;
     
         // If shuffling is active, or we are starting a playlist in shuffle mode
@@ -1537,7 +1573,26 @@ const App: React.FC = () => {
         // PASS PLAYLIST ID AS CONTEXT
         audioService.playQueue(finalQueue, finalIndex, playlistId || undefined);
     };
-    
+
+    const handleRemoveCurrentSongClick = () => {
+        if (!playerState.currentSong || !playingPlaylistId || playingPlaylistId.startsWith('temp-')) {
+            return;
+        }
+        
+        const song = playerState.currentSong;
+        const playlistId = playingPlaylistId;
+
+        setConfirmModal({
+            isOpen: true, 
+            title: "הסרת שיר", 
+            message: `האם להסיר את "${song.title}" מרשימת ההשמעה?`,
+            onConfirm: () => { 
+                setConfirmModal(prev => ({...prev, isOpen: false})); 
+                apiRemoveSong(playlistId, song.id); 
+            }
+        });
+    };
+
     const handlePlaylistPlay = (playlist: Playlist) => {
         if (playingPlaylistId === playlist.id && playlist.songs.length > 0) {
              togglePlayPause();
@@ -1569,6 +1624,7 @@ const App: React.FC = () => {
 
     const handleNext = useCallback(() => { 
         audioInitializedRef.current = true;
+        initialSeekTimeRef.current = 0;
         setPlayerState(prev => { 
             if (!prev.queue || prev.queue.length === 0) return prev; 
             const nextIdx = (prev.currentIndex + 1) % prev.queue.length; 
@@ -1583,6 +1639,7 @@ const App: React.FC = () => {
 
     const handlePrev = useCallback(() => { 
         audioInitializedRef.current = true;
+        initialSeekTimeRef.current = 0;
         setPlayerState(prev => { 
             if (!prev.queue || prev.queue.length === 0) return prev; 
             const prevIdx = (prev.currentIndex - 1 + prev.queue.length) % prev.queue.length; 
@@ -1638,12 +1695,20 @@ const App: React.FC = () => {
         if (playerState.isPlaying) { 
             audioService.pause(); 
             setPlayerState(p => ({ ...p, isPlaying: false })); 
-            saveStateToStorage(playerState, playingPlaylistId, 0);
+            // שומר את הזמן המדויק כשהמשתמש עושה פאוז!
+            saveStateToStorage(playerState, playingPlaylistId, currentTimeRef.current);
         } else {
-            // Fallback: If player has a song but native wasn't initialized (e.g. app restart without auto-play)
-            // we must re-send the queue to native so it knows what to play next
             if (!audioInitializedRef.current && playerState.currentSong) { 
                 audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined); 
+                
+                // --- דילוג שקט לזמן השמור ---
+                if (initialSeekTimeRef.current > 0) {
+                    setTimeout(() => {
+                        audioService.seek(initialSeekTimeRef.current);
+                        initialSeekTimeRef.current = 0;
+                    }, 800);
+                }
+                
                 audioInitializedRef.current = true; 
                 setPlayerState(p => ({ ...p, isPlaying: true })); 
             } else { 
@@ -1690,8 +1755,12 @@ const App: React.FC = () => {
         // App State Listener (Focus)
         const appStateListener = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
             console.log(`[App] App State Changed. Active: ${isActive}`);
+            // ברגע שהאפליקציה יורדת לרקע או נסגרת, אנחנו מיד שומרים את מיקום השיר!
+            if (!isActive && stateLoadedRef.current && latestPlayerStateRef.current.currentSong) {
+                saveStateToStorage(latestPlayerStateRef.current, latestPlaylistIdRef.current, currentTimeRef.current);
+            }
         });
-
+        const timeListener = audioService.addListener('timeUpdate', (data: any) => { currentTimeRef.current = data.currentTime; });
         const stateListener = audioService.addListener('stateChange', (data: any) => { setPlayerState(prev => ({ ...prev, isPlaying: data.isPlaying })); });
         const endListener = audioService.addListener('ended', () => { setPlayerState(prev => ({ ...prev, isPlaying: false })); });
         const transitionListener = audioService.addListener('itemTransition', (data: any) => {
@@ -1718,6 +1787,7 @@ const App: React.FC = () => {
             errorListener.remove(); 
             transitionListener.remove(); 
             audioService.cleanup(); 
+            timeListener.remove();
             
             // ניקוי המאזינים החדשים - קריטי למניעת קריסות באנדרואיד!
             networkListener.then(l => l.remove());
@@ -2624,7 +2694,16 @@ const App: React.FC = () => {
                     )}
                 </main>
             </div>
-            <Player playerState={playerState} onPlayPause={togglePlayPause} onNext={handleNext} onPrev={handlePrev} onShuffle={toggleShuffle} onToggleExpand={() => setPlayerState(p => ({...p, isExpanded: !p.isExpanded}))} onSeek={handleSeek} />
+            <Player 
+                playerState={playerState} 
+                onPlayPause={togglePlayPause} 
+                onNext={handleNext} 
+                onPrev={handlePrev} 
+                onShuffle={toggleShuffle} 
+                onToggleExpand={() => setPlayerState(p => ({...p, isExpanded: !p.isExpanded}))} 
+                onSeek={handleSeek} 
+                onRemoveCurrentSong={handleRemoveCurrentSongClick} 
+            />            
             <div className="md:hidden w-full flex-shrink-0 bg-neutral-900 border-t border-white/10 flex justify-around p-2 z-50 text-[10px]">
                 <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center p-2 ${activeTab==='home'?'text-white':'text-gray-500'}`}> <HomeIcon className="mb-1" /> בית </button>
                 <button onClick={() => setActiveTab('search')} className={`flex flex-col items-center p-2 ${activeTab==='search'?'text-white':'text-gray-500'}`}> <SearchIcon className="mb-1" /> חיפוש </button>
