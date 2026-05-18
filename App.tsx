@@ -328,6 +328,7 @@ const App: React.FC = () => {
     const [isSearching, setIsSearching] = useState(false);
     const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
+    const [focusedSuggestionIndex, setFocusedSuggestionIndex] = useState<number>(-1);
     const [searchHistory, setSearchHistory] = useState<string[]>([]);
     
     // AbortController for canceling previous searches
@@ -2283,21 +2284,51 @@ const App: React.FC = () => {
                                             onChange={e => {
                                                 setSearchQuery(e.target.value);
                                                 setShowSuggestions(true);
+                                                setFocusedSuggestionIndex(-1); // איפוס האינדקס בעת הקלדה
                                             }} 
                                             onFocus={() => setShowSuggestions(true)}
-                                            onBlur={() => setTimeout(() => setShowSuggestions(false), 250)}
+                                            onBlur={() => setTimeout(() => {
+                                                setShowSuggestions(false);
+                                                setFocusedSuggestionIndex(-1);
+                                            }, 250)}
                                             onKeyDown={(e) => {
+                                                // ניווט עם החיצים למטה ולמעלה
+                                                if (showSuggestions && searchSuggestions.length > 0) {
+                                                    if (e.key === 'ArrowDown') {
+                                                        e.preventDefault(); // מונע מסמן הטקסט לזוז
+                                                        setFocusedSuggestionIndex(prev => 
+                                                            prev < searchSuggestions.length - 1 ? prev + 1 : prev
+                                                        );
+                                                        return;
+                                                    }
+                                                    if (e.key === 'ArrowUp') {
+                                                        e.preventDefault();
+                                                        setFocusedSuggestionIndex(prev => prev > -1 ? prev - 1 : -1);
+                                                        return;
+                                                    }
+                                                }
+
+                                                // לחיצה על אנטר
                                                 if (e.key === 'Enter') {
                                                     e.preventDefault();
                                                     setShowSuggestions(false);
-                                                    if (searchQuery.trim()) {
+                                                    
+                                                    // אם המשתמש בחר הצעה בעזרת החיצים
+                                                    if (focusedSuggestionIndex >= 0 && focusedSuggestionIndex < searchSuggestions.length) {
+                                                        const selectedSuggestion = searchSuggestions[focusedSuggestionIndex];
+                                                        setSearchQuery(selectedSuggestion);
+                                                        performSearch(selectedSuggestion, false);
+                                                    } 
+                                                    // אם לא בחר כלום וסתם לחץ אנטר על מה שהקליד
+                                                    else if (searchQuery.trim()) {
                                                         performSearch(searchQuery, false);
                                                     }
+                                                    
+                                                    setFocusedSuggestionIndex(-1);
                                                     (e.target as HTMLInputElement).blur();
                                                 }
                                             }}
                                         />
-
                                         {/* כפתור חיפוש קולי */}
                                         <button 
                                             onClick={handleVoiceSearch}
@@ -2314,11 +2345,13 @@ const App: React.FC = () => {
                                                 {searchSuggestions.map((suggestion, idx) => (
                                                     <div
                                                         key={idx}
-                                                        className="flex items-center gap-4 p-3 hover:bg-white/10 cursor-pointer border-b border-white/5 last:border-0"
+                                                        className={`flex items-center gap-4 p-3 cursor-pointer border-b border-white/5 last:border-0 transition-colors
+                                                            ${focusedSuggestionIndex === idx ? 'bg-white/20' : 'hover:bg-white/10'}`}
+                                                        onMouseEnter={() => setFocusedSuggestionIndex(idx)} // סנכרון עם העכבר
                                                         onClick={() => {
                                                             setSearchQuery(suggestion);
                                                             setShowSuggestions(false);
-                                                            // טריגר לחיפוש כבד מיד עם הבחירה
+                                                            setFocusedSuggestionIndex(-1);
                                                             performSearch(suggestion, false);
                                                         }}
                                                     >
@@ -2368,7 +2401,9 @@ const App: React.FC = () => {
                                         </div>
                                     </div>
                                 ) : isSearching ? (
-                                    <div className="text-center mt-10 opacity-50">טוען...</div>
+                                    <div className="flex justify-center items-center mt-10">
+                                        <LoaderIcon className="w-8 h-8 animate-spin text-spotify-primary" />
+                                    </div>
                                 ) : (
                                     <>
                                         {/* === בלוק התוצאה המובילה והשירים (עטופים יחד כדי למנוע רווחים) === */}
@@ -2667,7 +2702,11 @@ const App: React.FC = () => {
                                 {!selectedPlaylist.id.startsWith('temp-') && !selectedPlaylist.isLikedSongs && !selectedPlaylist.externalId && (
                                     <div className="my-8">
                                         <div className="relative"> <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /> <input type="text" placeholder="חיפוש שירים להוספה..." value={playlistSearchQuery} onChange={e => setPlaylistSearchQuery(e.target.value)} className="w-full bg-white/10 rounded-full py-2 pr-4 pl-10 text-white placeholder-gray-400" /> </div>
-                                        {isPlaylistSearching && <div className="text-center mt-4 opacity-50">מחפש...</div>}
+                                        {isPlaylistSearching && (
+                                            <div className="flex justify-center items-center mt-4">
+                                                <LoaderIcon className="w-6 h-6 animate-spin text-spotify-primary" />
+                                            </div>
+                                        )}                                        
                                         {playlistSearchResults.length > 0 && (
                                             <div className="mt-2 space-y-1 max-h-60 overflow-y-auto no-scrollbar">
                                                 {playlistSearchResults.filter(r => !r.type || r.type === 'song' || r.type === 'video').map(res => (
