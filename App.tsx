@@ -23,7 +23,6 @@ import { logger } from './Logger';
 import LogViewer from './components/LogViewer';
 import { storageService } from './StorageService';
 
-// Import Plugin definition for direct usage if needed
 const StreamifyMedia = registerPlugin<StreamifyMediaPlugin>('StreamifyMedia');
 
 // --- Utilities ---
