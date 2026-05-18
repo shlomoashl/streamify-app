@@ -312,6 +312,7 @@ const App: React.FC = () => {
     const skipLockRef = useRef(false);
     // --- ניהול זמן לדילוג שקט (Resume Playback) ---
     const currentTimeRef = useRef<number>(0);
+    const unmuteSafetyTimerRef = useRef<any>(null);
     const initialSeekTimeRef = useRef<number>(0);
     const latestPlayerStateRef = useRef(playerState);
     const latestPlaylistIdRef = useRef(playingPlaylistId);
@@ -706,8 +707,15 @@ const App: React.FC = () => {
         if (!playerState.currentSong) return;
         console.log(`Auto-play attempt...`);
         try {
+            // אם אנחנו יודעים שהולך להיות דילוג, משתיקים את הנגן מראש ומפעילים טיימר ביטחון
+            if (initialSeekTimeRef.current > 0) {
+                audioService.setVolume(0);
+                unmuteSafetyTimerRef.current = setTimeout(() => audioService.setVolume(1), 3500);
+            }
+
             setPlayerState(prev => ({ ...prev, isPlaying: true }));
-            await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);            
+            await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);
+            
             audioInitializedRef.current = true;
         } catch (e) {
             console.error(`Auto-play failed:`, e);
@@ -1690,9 +1698,16 @@ const App: React.FC = () => {
             saveStateToStorage(playerState, playingPlaylistId, currentTimeRef.current);
         } else {
             if (!audioInitializedRef.current && playerState.currentSong) { 
-                audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);                 
+                // בדיקת השתקה לפני הפעלה
+                if (initialSeekTimeRef.current > 0) {
+                    audioService.setVolume(0);
+                    unmuteSafetyTimerRef.current = setTimeout(() => audioService.setVolume(1), 3500);
+                }
+
+                audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined); 
+                
                 audioInitializedRef.current = true; 
-                setPlayerState(p => ({ ...p, isPlaying: true })); 
+                setPlayerState(p => ({ ...p, isPlaying: true }));                 
             } else { 
                 audioService.resume(); 
                 setPlayerState(p => ({ ...p, isPlaying: true })); 
@@ -1745,13 +1760,21 @@ const App: React.FC = () => {
         const timeListener = audioService.addListener('timeUpdate', (data: any) => { 
             currentTimeRef.current = data.currentTime; 
             
-            // --- דילוג חכם מבוסס האזנה (מותאם למערכות מולטימדיה) ---
-            // רק כשהנגן מתחיל באמת להריץ את השיר (הזמן עבר את ה-0.1 שניות בגלל שהטעינה הסתיימה), אנחנו קופצים
+            // --- דילוג חכם ושקט (Silent Seek) ---
             if (initialSeekTimeRef.current > 0 && data.currentTime > 0.1) {
                 const targetTime = initialSeekTimeRef.current;
-                initialSeekTimeRef.current = 0; // איפוס מיידי למניעת לולאה אין-סופית
-                console.log(`[App] Media loaded natively. Seeking silently to ${targetTime}s`);
+                initialSeekTimeRef.current = 0; // איפוס מיידי 
+                
+                console.log(`[App] Media loaded. Seeking silently to ${targetTime}s`);
                 audioService.seek(targetTime);
+
+                // נותנים לדילוג 150 מילישניות להתבצע בשקט, ואז מדליקים את הסאונד
+                setTimeout(() => {
+                    audioService.setVolume(1); // החזרת הקול לפעולה מלאה (במובייל זה המקסימום הפנימי של האפליקציה)
+                    if (unmuteSafetyTimerRef.current) {
+                        clearTimeout(unmuteSafetyTimerRef.current); // מבטלים את טיימר החירום כי הצלחנו
+                    }
+                }, 150);
             }
         });
         const stateListener = audioService.addListener('stateChange', (data: any) => { setPlayerState(prev => ({ ...prev, isPlaying: data.isPlaying })); });
@@ -2273,7 +2296,7 @@ const App: React.FC = () => {
 
                     {activeTab === 'search' && (
                         <>
-                            <div className="p-4 pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4 bg-spotify-base z-20 shadow-md flex-shrink-0 border-b border-white/5">
+                            <div className="relative z-50 p-4 pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4 bg-spotify-base shadow-md flex-shrink-0 border-b border-white/5">
                                 <div className="relative flex items-center gap-4">
                                     <div className="relative flex-1"> 
                                         <SearchIcon className="absolute left-3 top-3 text-gray-400" /> 
