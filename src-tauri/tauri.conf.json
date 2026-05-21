@@ -44,7 +44,7 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "additionalBrowserArgs": "--disable-web-security --autoplay-policy=no-user-gesture-required"
+        "additionalBrowserArgs": "--disable-web-security --autoplay-policy=no-user-gesture-required --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding"
       }
     ]
   }

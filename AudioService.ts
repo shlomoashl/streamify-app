@@ -348,14 +348,14 @@ class AudioService {
             this.webCurrentIndex = startIndex;
             
             const song = items[startIndex];
-            const url = this.getStreamUrl(song.id); // <--- שינוי כאן: השתמשנו בפונקציה
+            const url = this.getStreamUrl(song.id);
             
             this.playWeb(song, url);
             
-            setTimeout(() => {
-                // קורא לפונקציה החדשה שלנו שדורשת רק את האינדקס הבא
+            // קריאה מיידית כדי למנוע הקפאה של מערכת ההפעלה ברקע
+            Promise.resolve().then(() => {
                 this.prepareNextSong(startIndex + 1);
-            }, 1000); // הורדתי את זה לשנייה אחת במקום 3, שיתחיל לחמם מהר יותר
+            });
         }
     }
 
@@ -394,9 +394,9 @@ class AudioService {
         } else {
             // 3. לוגיקת צללים לווינדוס/ווב: אחרי ששינינו את התור בשקט, 
             // נגיד לנגן הצללים להתחיל לחמם את השיר *החדש* שאחרינו בתור המעורבב.
-            setTimeout(() => {
+            Promise.resolve().then(() => {
                 this.prepareNextSong(index + 1);
-            }, 1000);
+            });
         }
     }
     
@@ -424,10 +424,9 @@ class AudioService {
         } else {
             this.playWeb(song, this.getStreamUrl(song.id));
             
-            setTimeout(() => {
-                // תיקון קריטי: index + 1 במקום startIndex + 1
+            Promise.resolve().then(() => {
                 this.prepareNextSong(index + 1);
-            }, 1000);
+            });
         }
     }
     
