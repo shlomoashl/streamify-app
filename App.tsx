@@ -24,7 +24,27 @@ import LogViewer from './components/LogViewer';
 import { storageService } from './StorageService';
 
 const StreamifyMedia = registerPlugin<StreamifyMediaPlugin>('StreamifyMedia');
-
+// --- קבועים והגדרות מערכת ---
+const STREAMIFY_KEYWORDS = [
+    'אברהם פריד', 
+    'יעקב שוואקי', 
+    'מרדכי בן דוד', 
+    'נפתלי קמפה', 
+    'brian tyler', 
+    'ישי ריבו', 
+    'שמוליק סוכות',
+    'קובי ברומר',
+    'חיים ישראל',
+    'בנצי שטיין',
+    'יידל ורדיגר',
+    'משה פלד',
+    'פיני איינהורן',
+    'ארי היל',
+    'עקיבא',
+    'הראל טל',
+    'שירים חסידיים', 
+    'פלייליסט חסידי'
+];
 // --- Utilities ---
 
 const parseDurationToSeconds = (dur: string | number): number => {
@@ -225,7 +245,7 @@ const App: React.FC = () => {
     // Init state with empty/default, then load async
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [activeTab, setActiveTab] = useState<ViewState>('home');
-    const [streamifyResults, setStreamifyResults] = useState<{keyword: string, results: YouTubeSearchResult[]}[]>([]);
+    const [streamifyResults, setStreamifyResults] = useState<YouTubeSearchResult[]>([]);
     const [isLoadingStreamify, setIsLoadingStreamify] = useState(false);
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
     const [folders, setFolders] = useState<Folder[]>([]);
@@ -624,32 +644,34 @@ const App: React.FC = () => {
         if (!forceRefresh && streamifyResults.length > 0) return;
         
         setIsLoadingStreamify(true);
-        const keywords = ['אברהם פריד', 'יעקב שוואקי', 'מרדכי בן דוד', 'נפתלי קמפה'];
         
         try {
-            // שולח את כל 4 הבקשות לשרת במקביל
-            const fetchPromises = keywords.map(async (kw) => {
-                const params = new URLSearchParams({ action: 'search_and_download_video', query: kw, search_engine: 'youtubemusic_playlists' });
+            // שימוש ברשימה הגלובלית שמוגדרת למעלה בראש הקובץ
+            const fetchPromises = STREAMIFY_KEYWORDS.map(async (kw) => {
+                const params = new URLSearchParams({ action: 'search_and_download_video', query: kw + ' mix', search_engine: 'youtubemusic_playlists' });
                 const res = await fetch(`${YOUTUBE_API_BASE}?${params.toString()}`);
                 const data = await res.json();
                 
                 if (data.success && data.results) {
-                    return {
-                        keyword: kw,
-                        results: data.results.slice(0, 5) // לוקח רק את ה-5 הראשונים מכל מילה
-                    };
+                    return data.results.slice(0, 5); // לוקח רק את ה-5 הראשונים מכל מילה
                 }
-                return null;
+                return [];
             });
 
-            // ממתין שכל התשובות יחזרו
-            const results = await Promise.all(fetchPromises);
+            // ממתין שכל התשובות יחזרו במקביל
+            const resultsArrays = await Promise.all(fetchPromises);
             
-            // מסנן החוצה שגיאות או תוצאות ריקות
-            const newResults = results.filter((res): res is {keyword: string, results: YouTubeSearchResult[]} => res !== null);
+            // הופך את כל הרשימות הקטנות לרשימה אחת ארוכה משוטחת
+            let allResults = resultsArrays.flat();
             
-            setStreamifyResults(newResults);
-            storageService.saveData('streamify_recommended', newResults); // שומר לזיכרון לפעם הבאה
+            // מערבב את הרשימה (Shuffle)
+            for (let i = allResults.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [allResults[i], allResults[j]] = [allResults[j], allResults[i]];
+            }
+            
+            setStreamifyResults(allResults);
+            storageService.saveData('streamify_recommended', allResults); // שומר לזיכרון
         } catch (e) {
             console.error("Failed to load streamify recommendations", e);
         } finally {
@@ -2753,36 +2775,29 @@ const App: React.FC = () => {
                                     <LoaderIcon className="w-8 h-8 animate-spin text-spotify-primary" />
                                 </div>
                             ) : (
-                                <div className="space-y-8">
-                                    {streamifyResults.map((group, idx) => (
-                                        <section key={idx}>
-                                            <h2 className="text-xl font-bold text-white mb-4 px-1">{group.keyword}</h2>
-                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6 px-1">
-                                                {group.results.map(res => {
-                                                    const isPlaying = playingPlaylistId === `temp-${res.id}` && playerState.isPlaying;
-                                                    return (
-                                                        <div key={res.id} onClick={() => handleResultClick(res)} 
-                                                            className="flex flex-col p-4 bg-[#181818] hover:bg-[#282828] text-right rounded-2xl cursor-pointer transition-all relative group border border-transparent hover:border-white/10" dir="rtl">
-                                                            
-                                                            <div className="relative w-full aspect-square mb-4 flex items-center justify-center rounded-xl shadow-lg bg-[#282828] overflow-hidden">
-                                                                {res.thumbnail_url ? <img src={res.thumbnail_url} className="w-full h-full object-cover" /> : <PlaylistIcon className="w-2/5 h-2/5 text-gray-500" />}
-                                                                
-                                                                <button 
-                                                                    onClick={(e) => handleDirectPlay(e, res)}
-                                                                    className="absolute bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-[0_4px_12px_rgba(0,0,0,0.6)] hover:scale-110 active:scale-95 transition-transform z-20 w-8 h-8 md:w-10 md:h-10 bottom-2 left-2 opacity-100 lg:opacity-0 group-hover:opacity-100"
-                                                                >
-                                                                    {isPlaying ? <PauseIcon className="w-4 h-4 md:w-5 md:h-5" fill /> : <PlayIcon className="w-4 h-4 md:w-5 md:h-5 ml-0.5" fill />}
-                                                                </button>
-                                                            </div>
-                                                            
-                                                            <div className="text-[15px] font-bold truncate w-full px-1 group-hover:text-spotify-primary text-white">{res.title}</div>
-                                                            <div className="text-[12px] text-gray-400 truncate w-full px-1 mt-1 font-medium">{res.author || 'פלייליסט'}</div>
-                                                        </div>
-                                                    );
-                                                })}
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6 px-1">
+                                    {streamifyResults.map((res, idx) => {
+                                        const isPlaying = playingPlaylistId === `temp-${res.id}` && playerState.isPlaying;
+                                        return (
+                                            <div key={`${res.id}-${idx}`} onClick={() => handleResultClick(res)} 
+                                                className="flex flex-col p-4 bg-[#181818] hover:bg-[#282828] text-right rounded-2xl cursor-pointer transition-all relative group border border-transparent hover:border-white/10" dir="rtl">
+                                                
+                                                <div className="relative w-full aspect-square mb-4 flex items-center justify-center rounded-xl shadow-lg bg-[#282828] overflow-hidden">
+                                                    {res.thumbnail_url ? <img src={res.thumbnail_url} className="w-full h-full object-cover" /> : <PlaylistIcon className="w-2/5 h-2/5 text-gray-500" />}
+                                                    
+                                                    <button 
+                                                        onClick={(e) => handleDirectPlay(e, res)}
+                                                        className="absolute bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-[0_4px_12px_rgba(0,0,0,0.6)] hover:scale-110 active:scale-95 transition-transform z-20 w-8 h-8 md:w-10 md:h-10 bottom-2 left-2 opacity-100 lg:opacity-0 group-hover:opacity-100"
+                                                    >
+                                                        {isPlaying ? <PauseIcon className="w-4 h-4 md:w-5 md:h-5" fill /> : <PlayIcon className="w-4 h-4 md:w-5 md:h-5 ml-0.5" fill />}
+                                                    </button>
+                                                </div>
+                                                
+                                                <div className="text-[15px] font-bold truncate w-full px-1 group-hover:text-spotify-primary text-white">{res.title}</div>
+                                                <div className="text-[12px] text-gray-400 truncate w-full px-1 mt-1 font-medium">{res.author || 'פלייליסט'}</div>
                                             </div>
-                                        </section>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
