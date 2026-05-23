@@ -75,7 +75,7 @@ export interface PlayerState {
     originalQueue?: PlaylistItem[]; // To restore order when shuffle is off
 }
 
-export type ViewState = 'home' | 'search' | 'library' | 'playlist';
+export type ViewState = 'home' | 'search' | 'library' | 'playlist' | 'streamify';
 
 // --- Native Plugin Interfaces ---
 

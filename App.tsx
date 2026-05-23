@@ -225,6 +225,8 @@ const App: React.FC = () => {
     // Init state with empty/default, then load async
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [activeTab, setActiveTab] = useState<ViewState>('home');
+    const [streamifyResults, setStreamifyResults] = useState<{keyword: string, results: YouTubeSearchResult[]}[]>([]);
+    const [isLoadingStreamify, setIsLoadingStreamify] = useState(false);
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
     const [folders, setFolders] = useState<Folder[]>([]);
     const [likedSongsPlaylist, setLikedSongsPlaylist] = useState<Playlist | null>(null);
@@ -432,8 +434,8 @@ const App: React.FC = () => {
                 }
                 return;
             }
-            
-            if (state.activeTab === 'search' || state.activeTab === 'library') {
+
+            if (state.activeTab === 'search' || state.activeTab === 'library' || state.activeTab === 'streamify') {
                 setActiveTab('home');
                 return;
             }
@@ -466,6 +468,8 @@ const App: React.FC = () => {
                 const savedPlaylists = await storageService.loadData<Playlist[]>('streamify_cache_playlists', []);
                 const savedFolders = await storageService.loadData<Folder[]>('streamify_cache_folders', []);
                 const savedLiked = await storageService.loadData<Playlist | null>('streamify_cache_liked', null);
+                const savedStreamify = await storageService.loadData<any>('streamify_recommended', []);
+                if (savedStreamify) setStreamifyResults(savedStreamify);
                 
                 setPlaylists(savedPlaylists);
                 setFolders(savedFolders);
@@ -615,6 +619,50 @@ const App: React.FC = () => {
     }, []);
 
     // --- Helper Functions to Update Local & Cache ---
+    const loadStreamifyRecommendations = async (forceRefresh = false) => {
+        // אם לא ביקשנו רענון חובה ויש כבר נתונים (מהזיכרון) - אל תחפש שוב
+        if (!forceRefresh && streamifyResults.length > 0) return;
+        
+        setIsLoadingStreamify(true);
+        const keywords = ['אברהם פריד', 'יעקב שוואקי', 'מרדכי בן דוד', 'נפתלי קמפה'];
+        
+        try {
+            // שולח את כל 4 הבקשות לשרת במקביל
+            const fetchPromises = keywords.map(async (kw) => {
+                const params = new URLSearchParams({ action: 'search_and_download_video', query: kw, search_engine: 'youtubemusic_playlists' });
+                const res = await fetch(`${YOUTUBE_API_BASE}?${params.toString()}`);
+                const data = await res.json();
+                
+                if (data.success && data.results) {
+                    return {
+                        keyword: kw,
+                        results: data.results.slice(0, 5) // לוקח רק את ה-5 הראשונים מכל מילה
+                    };
+                }
+                return null;
+            });
+
+            // ממתין שכל התשובות יחזרו
+            const results = await Promise.all(fetchPromises);
+            
+            // מסנן החוצה שגיאות או תוצאות ריקות
+            const newResults = results.filter((res): res is {keyword: string, results: YouTubeSearchResult[]} => res !== null);
+            
+            setStreamifyResults(newResults);
+            storageService.saveData('streamify_recommended', newResults); // שומר לזיכרון לפעם הבאה
+        } catch (e) {
+            console.error("Failed to load streamify recommendations", e);
+        } finally {
+            setIsLoadingStreamify(false);
+        }
+    };
+
+    // יפעיל את הטעינה כשלוחצים על הטאב אם הוא ריק
+    useEffect(() => {
+        if (activeTab === 'streamify') {
+            loadStreamifyRecommendations();
+        }
+    }, [activeTab]);
 
     const updatePlaylistsLocally = (newPlaylists: Playlist[]) => {
         setPlaylists(newPlaylists);
@@ -2181,12 +2229,23 @@ const App: React.FC = () => {
 
             <div className="flex flex-1 overflow-hidden relative">
                 <nav className="hidden md:flex flex-col w-64 bg-black px-4 pt-4 pb-2 h-full">
-                    <div onClick={() => setActiveTab('home')} className="flex items-center gap-2 text-xl font-bold mb-2 cursor-pointer hover:text-green-500 transition-colors"><MusicIcon /> Streamify</div>
-                    <div className="space-y-1">
-                        <button onClick={() => setActiveTab('home')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='home'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> <HomeIcon /> <span className="font-medium text-lg">בית</span> </button>
-                        <button onClick={() => setActiveTab('search')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='search'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> <SearchIcon /> <span className="font-medium text-lg">חיפוש</span> </button>
-                        {likedSongsPlaylist && <button onClick={() => {setSelectedPlaylist(likedSongsPlaylist); setActiveTab('playlist');}} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab === 'playlist' && selectedPlaylist?.id === likedSongsPlaylist.id ? 'bg-white/20 text-white' : 'text-gray-400 hover:bg-white/10 hover:text-white'}`}> <HeartIcon filled className="text-spotify-primary"/> <span className="font-medium text-lg">שירים שאהבתם</span> </button>}
-                    </div>
+                    {/* ביטלנו פה את הלוגו החריג כדי שייכנס לתוך הרשימה */}
+                    <div className="space-y-1 mt-4">
+                        <button onClick={() => setActiveTab('streamify')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='streamify'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
+                            <MusicIcon className="w-6 h-6" /> <span className="font-medium text-lg">Streamify</span> 
+                        </button>
+                        <button onClick={() => setActiveTab('home')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='home'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
+                            <HomeIcon /> <span className="font-medium text-lg">בית</span> 
+                        </button>
+                        <button onClick={() => setActiveTab('search')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='search'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
+                            <SearchIcon /> <span className="font-medium text-lg">חיפוש</span> 
+                        </button>
+                        {likedSongsPlaylist && (
+                            <button onClick={() => {setSelectedPlaylist(likedSongsPlaylist); setActiveTab('playlist');}} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab === 'playlist' && selectedPlaylist?.id === likedSongsPlaylist.id ? 'bg-white/20 text-white' : 'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
+                                <HeartIcon filled className="text-spotify-primary"/> <span className="font-medium text-lg">שירים שאהבתם</span> 
+                            </button>
+                        )}
+                    </div>                    
                     <div className="border-t border-white/20 mt-2 pt-2 flex-1 min-h-0 overflow-y-auto no-scrollbar">
                         <div className="flex justify-start items-center text-sm font-bold text-gray-400 mb-2 px-1">
                             <div className="flex flex-col gap-1 w-full">
@@ -2676,7 +2735,58 @@ const App: React.FC = () => {
                             </div>                                                          
                         </>
                     )}
+                    {activeTab === 'streamify' && (
+                        <div className="flex-1 p-4 overflow-y-auto no-scrollbar pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4">
+                            <div className="flex justify-between items-center mb-6 px-1">
+                                <h1 className="text-2xl font-bold">מומלצים עבורך (Streamify)</h1>
+                                <button 
+                                    onClick={() => loadStreamifyRecommendations(true)} 
+                                    className="p-2 bg-white/10 hover:bg-white/20 rounded-full flex items-center transition text-gray-400 hover:text-white"
+                                    title="רענן פלייליסטים מחדש"
+                                >
+                                    <RefreshCcwIcon className={`w-5 h-5 ${isLoadingStreamify ? 'animate-spin' : ''}`} />
+                                </button>
+                            </div>
 
+                            {isLoadingStreamify && streamifyResults.length === 0 ? (
+                                <div className="flex justify-center items-center mt-10">
+                                    <LoaderIcon className="w-8 h-8 animate-spin text-spotify-primary" />
+                                </div>
+                            ) : (
+                                <div className="space-y-8">
+                                    {streamifyResults.map((group, idx) => (
+                                        <section key={idx}>
+                                            <h2 className="text-xl font-bold text-white mb-4 px-1">{group.keyword}</h2>
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6 px-1">
+                                                {group.results.map(res => {
+                                                    const isPlaying = playingPlaylistId === `temp-${res.id}` && playerState.isPlaying;
+                                                    return (
+                                                        <div key={res.id} onClick={() => handleResultClick(res)} 
+                                                            className="flex flex-col p-4 bg-[#181818] hover:bg-[#282828] text-right rounded-2xl cursor-pointer transition-all relative group border border-transparent hover:border-white/10" dir="rtl">
+                                                            
+                                                            <div className="relative w-full aspect-square mb-4 flex items-center justify-center rounded-xl shadow-lg bg-[#282828] overflow-hidden">
+                                                                {res.thumbnail_url ? <img src={res.thumbnail_url} className="w-full h-full object-cover" /> : <PlaylistIcon className="w-2/5 h-2/5 text-gray-500" />}
+                                                                
+                                                                <button 
+                                                                    onClick={(e) => handleDirectPlay(e, res)}
+                                                                    className="absolute bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-[0_4px_12px_rgba(0,0,0,0.6)] hover:scale-110 active:scale-95 transition-transform z-20 w-8 h-8 md:w-10 md:h-10 bottom-2 left-2 opacity-100 lg:opacity-0 group-hover:opacity-100"
+                                                                >
+                                                                    {isPlaying ? <PauseIcon className="w-4 h-4 md:w-5 md:h-5" fill /> : <PlayIcon className="w-4 h-4 md:w-5 md:h-5 ml-0.5" fill />}
+                                                                </button>
+                                                            </div>
+                                                            
+                                                            <div className="text-[15px] font-bold truncate w-full px-1 group-hover:text-spotify-primary text-white">{res.title}</div>
+                                                            <div className="text-[12px] text-gray-400 truncate w-full px-1 mt-1 font-medium">{res.author || 'פלייליסט'}</div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
                     {activeTab === 'playlist' && selectedPlaylist && (
                         <div>
                             <div className="sticky top-0 z-10 p-4 pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4 bg-spotify-base/95 backdrop-blur flex items-center gap-4 border-b border-white/5">
@@ -2758,9 +2868,18 @@ const App: React.FC = () => {
                 onRemoveCurrentSong={handleRemoveCurrentSongClick} 
             />            
             <div className="md:hidden w-full flex-shrink-0 bg-neutral-900 border-t border-white/10 flex justify-around p-2 z-50 text-[10px]">
-                <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center p-2 ${activeTab==='home'?'text-white':'text-gray-500'}`}> <HomeIcon className="mb-1" /> בית </button>
-                <button onClick={() => setActiveTab('search')} className={`flex flex-col items-center p-2 ${activeTab==='search'?'text-white':'text-gray-500'}`}> <SearchIcon className="mb-1" /> חיפוש </button>
-                <button onClick={() => setActiveTab('library')} className={`flex flex-col items-center p-2 ${activeTab==='library'?'text-white':'text-gray-500'}`}> <LibraryIcon className="mb-1" /> ספרייה </button>
+                <button onClick={() => setActiveTab('streamify')} className={`flex flex-col items-center p-2 ${activeTab==='streamify'?'text-white':'text-gray-500'}`}> 
+                    <MusicIcon className="mb-1" /> Streamify 
+                </button>
+                <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center p-2 ${activeTab==='home'?'text-white':'text-gray-500'}`}> 
+                    <HomeIcon className="mb-1" /> בית 
+                </button>
+                <button onClick={() => setActiveTab('search')} className={`flex flex-col items-center p-2 ${activeTab==='search'?'text-white':'text-gray-500'}`}> 
+                    <SearchIcon className="mb-1" /> חיפוש 
+                </button>
+                <button onClick={() => setActiveTab('library')} className={`flex flex-col items-center p-2 ${activeTab==='library'?'text-white':'text-gray-500'}`}> 
+                    <LibraryIcon className="mb-1" /> ספרייה 
+                </button>
             </div>
         </div>
     );
