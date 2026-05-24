@@ -1657,52 +1657,52 @@ const App: React.FC = () => {
             return;
         }
 
-        // פונקציית עזר ליצירת השהייה יזומה (כדי שתוכל לראות את השלבים מתחלפים)
         const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
         setGlobalLoading("מוריד עדכון פנימי...");
         
         try {
             setUpdateStatusMsg("1/5: מחפש עדכון מול שרתי גיטהאב...");
-            await delay(1000); // המתנה של שנייה
+            await delay(1000);
             
             const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/latest?nocache=${Date.now()}`);
-            
-            setUpdateStatusMsg("2/5: קורא את נתוני העדכון...");
-            await delay(1000);
             const data = await res.json();
+            
+            // --- החלק החשוב: חילוץ תגית הגרסה הרשמית מגיטהאב ---
+            const tagName = data.tag_name || "לא ידוע";
+            
+            // מציגים לך מיד את הגרסה שנמצאה בשרת
+            setUpdateStatusMsg(`2/5: נמצאה גרסה ${tagName}! מנתח נתוני שרת...`);
+            await delay(1500); // השהייה מכוונת כדי שתוכל לראות ולוודא את המספר
             
             const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
             
             if (!updateAsset) {
-                throw new Error("קובץ העדכון (update.zip) לא נמצא בשרת");
+                throw new Error(`קובץ העדכון (update.zip) לא נמצא בשרת עבור גרסה ${tagName}`);
             }
 
             const serverDate = new Date(updateAsset.updated_at).getTime();
             const uniqueCapgoVersion = `${serverDate}_${Math.floor(Math.random() * 100000)}`;
             const downloadUrl = `${updateAsset.browser_download_url}?nocache=${Date.now()}`;
             
-            setUpdateStatusMsg(`3/5: מוריד את הקובץ החדש מגיטהאב...`);
-            // כאן אין השהייה יזומה כי ההורדה עצמה לוקחת זמן
+            // מעדכנים את הודעת ההורדה עם מספר הגרסה
+            setUpdateStatusMsg(`3/5: מוריד את קובץ הגרסה ${tagName}...`);
             const result = await CapacitorUpdater.download({
                 url: downloadUrl,
                 version: uniqueCapgoVersion, 
             });
             
-            // עכשיו, לפני הריסטארט, אנחנו מכריחים את האפליקציה לחכות כדי שתראה את ההצלחה
-            setUpdateStatusMsg("4/5: ההורדה הסתיימה בהצלחה! מכין נתונים...");
+            setUpdateStatusMsg(`4/5: גרסה ${tagName} הורדה בהצלחה! מכין נתונים...`);
             await delay(1500); 
             
             localStorage.setItem('streamify_app_version_date', serverDate.toString());
             setUpdateAvailable(false); 
             
-            setUpdateStatusMsg("5/5: מתקין ומרענן... האפליקציה תופעל מחדש מיד!");
-            await delay(1500); // נותן לך לראות את שלב 5 לפני שהמסך הופך לשחור
+            setUpdateStatusMsg(`5/5: מתקין את ${tagName}... האפליקציה תופעל מחדש!`);
+            await delay(1500); 
             
-            // מפעיל את העדכון והריסטארט המיידי
             await CapacitorUpdater.set(result); 
             
-            // גיבוי למקרה שהפלאגין לא עושה ריסטארט אוטומטי
             setTimeout(() => {
                 window.location.reload();
             }, 3000);
