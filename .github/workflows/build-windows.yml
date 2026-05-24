@@ -12,22 +12,26 @@ jobs:
       contents: write
 
     steps:
+    # 1. מוריד את הקוד לשרת הווינדוס
     - name: Checkout code
       uses: actions/checkout@v4
 
+    # 2. מתקין Node.js
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
 
+    # 3. מתקין את שפת Rust
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
 
+    # 4. מתקין את כל הספריות של הפרויקט
     - name: Install dependencies
       run: npm install
 
-    # הסקריפט החדש: משתמש במספר הריצה של גיטהאב בלי לשמור חזרה לגיט!
-    - name: Prepare Dynamic Version Script
+    # 5. יצירת והרצת הגרסה הדינמית (משתמש במספר הריצה של גיטהאב בלי לשמור חזרה לגיט!)
+    - name: Generate and Execute Dynamic Version
       shell: bash
       env:
         RUN_NUMBER: ${{ github.run_number }}
@@ -39,7 +43,7 @@ jobs:
         const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
         let [major, minor] = pkg.version.split('.').map(Number);
         
-        // מחבר את הגרסה שלך (1.1) עם מספר הריצה בגיטהאב
+        // מחבר את גרסת הבסיס (למשל 1.1) עם מספר הריצה הנוכחי בגיטהאב
         const newVersion = major + '.' + minor + '.' + runNumber;
         
         pkg.version = newVersion;
@@ -58,12 +62,9 @@ jobs:
         }
         console.log('Dynamic version generated for this build: ' + newVersion);
         EOF
+        node bump-version.cjs
 
-    - name: Execute Dynamic Version
-      run: node bump-version.cjs
-
-    # ---- שמנו לב? אין כאן יותר שלב של Commit & Push! המחשב שלך נשאר נקי ----
-
+    # 6. מקמפל את אפליקציית הווינדוס ומחתים אותה עבור ה-Updater
     - name: Build Tauri Windows App
       run: npm run build:windows
       env:
@@ -72,6 +73,7 @@ jobs:
         TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
         TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
+    # 7. מייצר את קובץ ה-latest.json שמכיל את נתוני העדכון והחתימה הדיגיטלית
     - name: Generate latest.json for Updater
       shell: bash
       run: |
@@ -107,17 +109,18 @@ jobs:
         };
         
         fs.writeFileSync('latest.json', JSON.stringify(latest, null, 2));
+        console.log('Generated latest.json for version ' + version);
         EOF
+        node generate-latest.cjs
 
-    - name: Execute Latest JSON Generation
-      run: node generate-latest.cjs
-
+    # 8. מעלה את קובץ ההתקנה כ-Artifact לגיבוי רגיל במערכת של GitHub Actions
     - name: Upload Windows App
       uses: actions/upload-artifact@v4
       with:
         name: streamify-windows
         path: src-tauri/target/release/bundle/
 
+    # 9. יוצר Release רשמי בגיטהאב עם מספר ה-TAG העולה ומעלה אליו את כל הקבצים הנדרשים
     - name: Create GitHub Release and Upload Windows App
       uses: softprops/action-gh-release@v1
       with:
