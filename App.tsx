@@ -482,6 +482,23 @@ const App: React.FC = () => {
         };
     }, []);
 
+    // ניהול עדכונים: איתות חיים מיידי ואישור עדכון ממתין
+    useEffect(() => {
+        if (Capacitor.isNativePlatform()) {
+            // משדר שהאפליקציה חיה ונושמת (מונע מחיקת עדכון שגויה)
+            CapacitorUpdater.notifyAppReady().catch(console.error);
+
+            // בדיקת עדכון ממתין ואישור סופי שלו
+            const pendingUpdate = localStorage.getItem('streamify_pending_update');
+            if (pendingUpdate) {
+                localStorage.setItem('streamify_app_version_date', pendingUpdate);
+                localStorage.removeItem('streamify_pending_update');
+                setUpdateAvailable(false); // כיבוי חיווי העדכון בממשק
+                console.log("העדכון הפנימי הותקן בהצלחה!");
+            }
+        }
+    }, []);
+
     useEffect(() => {
         const checkUpdateAvailability = async () => {
             if (!Capacitor.isNativePlatform()) return; 
@@ -671,18 +688,11 @@ const App: React.FC = () => {
                 // Last selected playlist
                 const lastPlaylist = await storageService.loadData<Playlist | null>('streamify_last_playlist', null);
                 if (lastPlaylist) setSelectedPlaylist(lastPlaylist);
-
-                setIsAppReady(true);
-                if (Capacitor.isNativePlatform()) {
-                    CapacitorUpdater.notifyAppReady();
-                }                
+                setIsAppReady(true);         
             } catch (e) {
                 console.error("Initialization failed:", e);
                 stateLoadedRef.current = true; // Allow saving even if load failed, to recover eventually
-                setIsAppReady(true); 
-                if (Capacitor.isNativePlatform()) {
-                    CapacitorUpdater.notifyAppReady();
-                }                
+                setIsAppReady(true);                 
             }
         };
         initApp();
@@ -1666,8 +1676,14 @@ const App: React.FC = () => {
             await delay(500);
             
             const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/latest?nocache=${Date.now()}`);
+            
+            // התיקון שלך: וידוא תקינות התשובה
+            if (!res.ok) throw new Error("שגיאה בקבלת נתוני גרסה מגיטהאב");
+            
             const data = await res.json();
-            const tagName = data.tag_name || "לא ידוע";
+            const tagName = data.tag_name; 
+            
+            if (!tagName) throw new Error("לא נמצאה תגית גרסה תקינה בשרת");
             
             setUpdateStatusMsg(`2/5: נמצאה גרסה ${tagName}! מנתח נתוני שרת...`);
             await delay(1000);
@@ -1676,34 +1692,40 @@ const App: React.FC = () => {
             if (!updateAsset) throw new Error("קובץ update.zip לא נמצא בשרת");
 
             const serverDate = new Date(updateAsset.updated_at).getTime();
-            const uniqueCapgoVersion = `${serverDate}_${Math.floor(Math.random() * 100000)}`;
-            
-            // אנחנו מעבירים את הכתובת המקורית של גיטהאב ישירות לפלאגין (בלי ה-fetch interceptor שהרס לנו)
-            const downloadUrl = `${updateAsset.browser_download_url}?nocache=${Date.now()}`;
+            const downloadUrl = updateAsset.browser_download_url;
             
             setUpdateStatusMsg(`3/5: מוריד את גרסה ${tagName}...`);
             
             const result = await CapacitorUpdater.download({
                 url: downloadUrl, 
-                version: uniqueCapgoVersion, 
+                version: tagName, 
             });
             
-            setUpdateStatusMsg(`4/5: גרסה ${tagName} הורדה בהצלחה! מכין נתונים...`);
-            await delay(1500); 
+            setUpdateStatusMsg(`4/5: גרסה ${tagName} הורדה בהצלחה! מכין התקנה...`);
+            await delay(1000); 
             
-            localStorage.setItem('streamify_app_version_date', serverDate.toString());
+            // שומרים את העדכון כ"ממתין"
+            localStorage.setItem('streamify_pending_update', serverDate.toString());
             setUpdateAvailable(false); 
             
-            setUpdateStatusMsg(`5/5: מתקין את ${tagName}... האפליקציה תופעל מחדש!`);
+            setUpdateStatusMsg(`5/5: מתקין את ${tagName}... האפליקציה תתרענן מיד!`);
             await delay(1500); 
             
             await CapacitorUpdater.set(result); 
             
-            setTimeout(() => {
-                window.location.reload();
-            }, 3000);
+            // התיקון שלך: בקרת TypeScript בטוחה לריסטארט
+            const updaterAny = CapacitorUpdater as any;
+            if (typeof updaterAny.reload === 'function') {
+                await updaterAny.reload();
+            } else {
+                setTimeout(() => {
+                    window.location.reload();
+                }, 3000);
+            }
             
         } catch (e: any) {
+            // ניקוי הממתין במקרה של כישלון
+            localStorage.removeItem('streamify_pending_update');
             setUpdateStatusMsg(`שגיאה: ${e.message}`);
             setTimeout(() => {
                 setGlobalLoading(null);
@@ -1714,6 +1736,7 @@ const App: React.FC = () => {
             }, 5000);
         }
     };
+
     const handleLogout = () => { 
         setConfirmModal({
             isOpen: true, title: "התנתקות", message: "האם להתנתק?",
