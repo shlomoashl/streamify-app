@@ -1712,32 +1712,21 @@ const App: React.FC = () => {
                 version: tagName,
             });
 
-            console.log("Downloaded bundle:", result);
-
             setUpdateStatusMsg(`4/5: גרסה ${tagName} הורדה בהצלחה! מכין התקנה...`);
             await delay(1000);
 
             localStorage.setItem("streamify_pending_update", serverDate.toString());
             setUpdateAvailable(false);
 
-            setUpdateStatusMsg(`5/5: מעדכן וסוגר את האפליקציה... פתחו אותה מחדש להשלמת העדכון`);
+            setUpdateStatusMsg(`5/5: מעדכן וסוגר את האפליקציה...`);
             await delay(1500);
 
-            const updaterAny = CapacitorUpdater as any;
+            await CapacitorUpdater.set(result);
 
-            if (typeof updaterAny.setNext === "function") {
-                await updaterAny.setNext(result);
-                console.log("Bundle set as next:", result);
-            } else {
-                await CapacitorUpdater.set(result);
-                console.log("Bundle set directly:", result);
-            }
-
-            await delay(1000);
-
-            setGlobalLoading(null);
-
-            CapacitorApp.exitApp();
+            // בלי reload בכלל
+            setTimeout(() => {
+                CapacitorApp.exitApp();
+            }, 1000);
 
         } catch (e: any) {
             localStorage.removeItem("streamify_pending_update");
@@ -1753,7 +1742,7 @@ const App: React.FC = () => {
                     onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
                     isAlertOnly: true
                 });
-            }, 5000);
+            }, 4000);
         }
     };
 
@@ -2971,7 +2960,7 @@ const App: React.FC = () => {
                     {activeTab === 'streamify' && (
                         <div className="flex-1 p-4 overflow-y-auto no-scrollbar pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4">
                             <div className="flex justify-between items-center mb-6 px-1">
-                                <h1 className="text-2xl font-bold">מומלצים עבורך</h1>
+                                <h1 className="text-2xl font-bold">מומלצים עעעעעעבורך</h1>
                                 <button 
                                     onClick={() => loadStreamifyRecommendations(true)} 
                                     className="p-2 bg-white/10 hover:bg-white/20 rounded-full flex items-center transition text-gray-400 hover:text-white"
