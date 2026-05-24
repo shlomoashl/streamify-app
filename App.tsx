@@ -1641,40 +1641,45 @@ const App: React.FC = () => {
     };
 
     const checkForInternalUpdates = async () => {
-        if (!Capacitor.isNativePlatform()) {
-            setConfirmModal({
-                isOpen: true, title: "עדכון גרסה", 
-                message: "עדכון פנימי נתמך באנדרואיד בלבד. במחשב זה אוטומטי.",
-                onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
-            });
-            return;
-        }
+        if (!Capacitor.isNativePlatform()) return;
 
-        setGlobalLoading("מוריד עדכון פנימי...");
+        logger.info("[Updater] מתחיל בדיקת עדכון...");
+        setGlobalLoading("בודק עדכון...");
+
         try {
-            // התיקון 1: מידע מעודכן על הגרסה
-            const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build?t=${Date.now()}`);
+            // הוספת חותמת זמן כדי למנוע קאש של ה-CDN של גיטהאב
+            const timestamp = Date.now();
+            const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build?t=${timestamp}`);
+            
+            if (!res.ok) throw new Error(`גיטהאב לא עונה: ${res.status}`);
+            
             const data = await res.json();
             const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
-            const newVersionDate = updateAsset ? new Date(updateAsset.updated_at).getTime() : Date.now();
-
-            // התיקון 2 הקריטי: מוסיף חותמת זמן כדי שגיטהאב ישלח את הקובץ של היום ולא של אתמול!
-            const downloadUrl = `https://github.com/shlomoashl/streamify-app/releases/download/latest-build/update.zip?t=${Date.now()}`;
             
+            if (!updateAsset) {
+                logger.error("[Updater] קובץ update.zip לא נמצא ב-Release!");
+                return;
+            }
+
+            // הורדה עם חותמת זמן בסוף הקישור כדי להכריח הורדה טרייה
+            const downloadUrl = `${updateAsset.browser_download_url}?t=${timestamp}`;
+            logger.info(`[Updater] מוריד מהקישור: ${downloadUrl}`);
+            
+            setGlobalLoading("מוריד...");
             const result = await CapacitorUpdater.download({
                 url: downloadUrl,
-                version: newVersionDate.toString(), 
+                version: updateAsset.updated_at, 
             });
             
-            setGlobalLoading("מתקין ומרענן...");
-            localStorage.setItem('streamify_app_version_date', newVersionDate.toString());
-            setUpdateAvailable(false); 
+            logger.info("[Updater] הורדה הצליחה! מחיל שינויים...");
+            setGlobalLoading("מתקין...");
             
-            await CapacitorUpdater.set(result); 
-        } catch (e) {
-            console.error('Update failed', e);
+            await CapacitorUpdater.set(result);
+            logger.info("[Updater] העדכון הוחל בהצלחה.");
+        } catch (e: any) {
+            logger.error(`[Updater] שגיאה: ${e.message}`);
             setConfirmModal({
-                isOpen: true, title: "שגיאה", message: "נכשל בהורדת העדכון.",
+                isOpen: true, title: "שגיאת עדכון", message: e.message,
                 onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
             });
         } finally {
@@ -2395,7 +2400,14 @@ const App: React.FC = () => {
                                     <div className="flex justify-between items-center">
                                         <h1 className="text-2xl font-bold">שלום</h1>
                                         <div className="flex items-center gap-3">
-                                 
+                                            {/* כפתור לוגים חדש וברור */}
+                                            <button 
+                                                onClick={() => setShowLogs(true)} 
+                                                className="p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-all shadow-md" 
+                                                title="צפה בלוגים"
+                                            > 
+                                                <TerminalIcon className="w-5 h-5" /> 
+                                            </button>                                 
                                             {Capacitor.isNativePlatform() && (
                                                 <div className="relative">
                                                     <button

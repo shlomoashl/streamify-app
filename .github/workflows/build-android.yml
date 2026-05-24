@@ -78,3 +78,4 @@ jobs:
         allowUpdates: true
         replacesArtifacts: true
         artifacts: "android/app/build/outputs/apk/release/app-release.apk,update.zip"
+        token: ${{ secrets.GITHUB_TOKEN }}
