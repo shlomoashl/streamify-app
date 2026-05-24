@@ -66,7 +66,7 @@ jobs:
 
     # 6. מקמפל את אפליקציית הווינדוס ומחתים אותה עבור ה-Updater
     - name: Build Tauri Windows App
-      run: npm run build:windows
+      run: npx @tauri-apps/cli@1 build --verbose
       env:
         VITE_SERVER_URL: ${{ secrets.VITE_SERVER_URL }}
         VITE_APP_ENTRY_CODE: ${{ secrets.VITE_APP_ENTRY_CODE }}
@@ -77,76 +77,94 @@ jobs:
       shell: pwsh
       run: |
         Get-ChildItem src-tauri/target/release/bundle -Recurse
-    # 7. מייצר את קובץ ה-latest.json שמכיל את נתוני העדכון והחתימה הדיגיטלית
 
-    - name: Generate latest.json for Updater
-      shell: bash
+    - name: Show target updater files
+      shell: pwsh
       run: |
-        cat << 'EOF' > generate-latest.cjs
-        const fs = require('fs');
-        const path = require('path');
-        const { version } = require('./package.json');
-
-        let sigContent = '';
-        let updateFile = '';
-
-        const dirs = [
-          './src-tauri/target/release/bundle/nsis',
-          './src-tauri/target/release/bundle/msi'
-        ];
-
-        for (const dir of dirs) {
-          if (!fs.existsSync(dir)) continue;
-
-          const files = fs.readdirSync(dir);
-
-          console.log('Files in', dir, files);
-
-          const sigFile = files.find(f => f.endsWith('.sig'));
-
-          if (sigFile) {
-            sigContent = fs.readFileSync(
-              path.join(dir, sigFile),
-              'utf8'
-            ).trim();
-
-            updateFile = sigFile.replace('.sig', '');
-
-            console.log('Found signature:', sigFile);
-            console.log('Update file:', updateFile);
-
-            break;
-          }
+        Get-ChildItem src-tauri/target/release -Recurse | Where-Object {
+          $_.Name -like "*.sig" -or
+          $_.Name -like "*.zip" -or
+          $_.Name -like "*updater*"
         }
+    - name: Verify signing secrets
+      shell: pwsh
+      env:
+        TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+        TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+      run: |
+        Write-Host "PRIVATE KEY LENGTH: $($env:TAURI_PRIVATE_KEY.Length)"
+        Write-Host "PASSWORD LENGTH: $($env:TAURI_KEY_PASSWORD.Length)"
+    # 7. מייצר את קובץ ה-latest.json שמכיל את נתוני העדכון והחתימה הדיגיטלית
+    - name: Skip latest.json for debugging
+      run: echo "Skipping latest.json generation"
+    # - name: Generate latest.json for Updater
+    #   shell: bash
+    #   run: |
+    #     cat << 'EOF' > generate-latest.cjs
+    #     const fs = require('fs');
+    #     const path = require('path');
+    #     const { version } = require('./package.json');
 
-        if (!sigContent || !updateFile) {
-          throw new Error(
-            'No updater signature file found (.sig)'
-          );
-        }
+    #     let sigContent = '';
+    #     let updateFile = '';
 
-        const latest = {
-          version,
-          notes: `עדכון אוטומטי לגרסה ${version}`,
-          pub_date: new Date().toISOString(),
-          platforms: {
-            'windows-x86_64': {
-              signature: sigContent,
-              url: `https://github.com/shlomoashl/streamify-app/releases/download/v${version}/${updateFile}`
-            }
-          }
-        };
+    #     const dirs = [
+    #       './src-tauri/target/release/bundle/nsis',
+    #       './src-tauri/target/release/bundle/msi'
+    #     ];
 
-        fs.writeFileSync(
-          'latest.json',
-          JSON.stringify(latest, null, 2)
-        );
+    #     for (const dir of dirs) {
+    #       if (!fs.existsSync(dir)) continue;
 
-        console.log('Generated latest.json');
-        console.log(JSON.stringify(latest, null, 2));
-        EOF
+    #       const files = fs.readdirSync(dir);
 
-        node generate-latest.cjs
+    #       console.log('Files in', dir, files);
+
+    #       const sigFile = files.find(f => f.endsWith('.sig'));
+
+    #       if (sigFile) {
+    #         sigContent = fs.readFileSync(
+    #           path.join(dir, sigFile),
+    #           'utf8'
+    #         ).trim();
+
+    #         updateFile = sigFile.replace('.sig', '');
+
+    #         console.log('Found signature:', sigFile);
+    #         console.log('Update file:', updateFile);
+
+    #         break;
+    #       }
+    #     }
+
+    #     if (!sigContent || !updateFile) {
+    #       throw new Error(
+    #         'No updater signature file found (.sig)'
+    #       );
+    #     }
+
+    #     const latest = {
+    #       version,
+    #       notes: `עדכון אוטומטי לגרסה ${version}`,
+    #       pub_date: new Date().toISOString(),
+    #       platforms: {
+    #         'windows-x86_64': {
+    #           signature: sigContent,
+    #           url: `https://github.com/shlomoashl/streamify-app/releases/download/v${version}/${updateFile}`
+    #         }
+    #       }
+    #     };
+
+    #     fs.writeFileSync(
+    #       'latest.json',
+    #       JSON.stringify(latest, null, 2)
+    #     );
+
+    #     console.log('Generated latest.json');
+    #     console.log(JSON.stringify(latest, null, 2));
+    #     EOF
+
+    #     node generate-latest.cjs
     
     # 8. מעלה את קובץ ההתקנה כ-Artifact לגיבוי רגיל במערכת של GitHub Actions
     - name: Upload Windows App
