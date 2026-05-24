@@ -5,6 +5,9 @@ import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import { KeepAwake } from '@capacitor-community/keep-awake';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { Network } from '@capacitor/network';
+// הוסף את זה למעלה יחד עם שאר ה-imports
+import { checkUpdate, installUpdate } from '@tauri-apps/api/updater';
+import { relaunch } from '@tauri-apps/api/process';
 import { App as CapacitorApp } from '@capacitor/app';
 import { 
     User, Playlist, PlaylistItem, YouTubeSearchResult, 
@@ -1676,17 +1679,53 @@ const App: React.FC = () => {
     };
 
     const checkForInternalUpdates = async () => {
+        // אם אנחנו בווינדוס (Tauri)
         if (!Capacitor.isNativePlatform()) {
-            setConfirmModal({
-                isOpen: true,
-                title: "עדכון גרסה",
-                message: "עדכון פנימי נתמך באנדרואיד בלבד.",
-                onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
-                isAlertOnly: true
-            });
+            try {
+                setGlobalLoading("מחפש עדכונים ל-Windows...");
+                
+                // בודק מול השרת אם יש גרסה חדשה
+                const { shouldUpdate, manifest } = await checkUpdate();
+
+                if (shouldUpdate) {
+                    setGlobalLoading(null);
+                    setConfirmModal({
+                        isOpen: true,
+                        title: "עדכון גרסה זמין!",
+                        message: `נמצאה גרסה חדשה (${manifest?.version}). האם תרצה להתקין ולהפעיל מחדש עכשיו?`,
+                        onConfirm: async () => {
+                            setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                            setGlobalLoading("מוריד ומתקין את העדכון... האפליקציה תופעל מחדש בסיום.");
+                            
+                            // מוריד ומתקין!
+                            await installUpdate();
+                            // מפעיל מחדש את האפליקציה אוטומטית
+                            await relaunch();
+                        }
+                    });
+                } else {
+                    setGlobalLoading(null);
+                    setConfirmModal({
+                        isOpen: true,
+                        title: "הכל מעודכן",
+                        message: "יש לך את הגרסה העדכנית ביותר.",
+                        onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+                        isAlertOnly: true
+                    });
+                }
+            } catch (error) {
+                setGlobalLoading(null);
+                console.error("שגיאה בבדיקת עדכונים:", error);
+                setConfirmModal({
+                    isOpen: true,
+                    title: "שגיאה",
+                    message: "לא הצלחנו לבדוק עדכונים. נסה שוב מאוחר יותר.",
+                    onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+                    isAlertOnly: true
+                });
+            }
             return;
         }
-
         const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
         setGlobalLoading("מוריד עדכון פנימי...");

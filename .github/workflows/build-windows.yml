@@ -2,54 +2,91 @@ name: Build Windows App
 
 on:
   push:
-    branches: [ main, master ] # עכשיו הבוט ירוץ *רק* כשאתה עושה push רגיל
-  workflow_dispatch: # מאפשר לך להריץ גם ידנית מהאתר
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build-windows:
     runs-on: windows-latest
     permissions:
-      contents: write # הרשאה הכרחית כדי שהבוט יוכל לכתוב לעמוד ה-Releases
+      contents: write
 
     steps:
-    # 1. מוריד את הקוד לשרת הווינדוס
     - name: Checkout code
       uses: actions/checkout@v4
 
-    # 2. מתקין Node.js
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
 
-    # 3. מתקין את שפת Rust
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
 
-    # 4. מתקין את כל הספריות של הפרויקט
     - name: Install dependencies
       run: npm install
 
-    # 5. מקמפל את אפליקציית הווינדוס!
     - name: Build Tauri Windows App
       run: npm run build:windows
       env:
         VITE_SERVER_URL: ${{ secrets.VITE_SERVER_URL }}
         VITE_APP_ENTRY_CODE: ${{ secrets.VITE_APP_ENTRY_CODE }}
+        # שולחים ל-Tauri את מפתחות החתימה שיצרנו
+        TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+        TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
-    # 6. מעלה את קובץ ההתקנה כ-Artifact (לגיבוי רגיל)
-    - name: Upload Windows App
+    - name: Generate latest.json for Updater
+      run: |
+        node -e "
+          const fs = require('fs');
+          const path = require('path');
+          const { version } = require('./package.json');
+          
+          let sigContent = '', zipName = '';
+          const dirs = ['./src-tauri/target/release/bundle/nsis', './src-tauri/target/release/bundle/msi'];
+          
+          for (const dir of dirs) {
+              if (fs.existsSync(dir)) {
+                  const sigFile = fs.readdirSync(dir).find(f => f.endsWith('.zip.sig'));
+                  if (sigFile) {
+                      sigContent = fs.readFileSync(path.join(dir, sigFile), 'utf8');
+                      zipName = sigFile.replace('.sig', '');
+                      break;
+                  }
+              }
+          }
+          
+          const latest = {
+              version: version,
+              notes: 'עדכון אוטומטי חדש זמין!',
+              pub_date: new Date().toISOString(),
+              platforms: {
+                  'windows-x86_64': {
+                      signature: sigContent,
+                      url: 'https://github.com/shlomoashl/streamify-app/releases/download/latest-build/' + zipName
+                  }
+              }
+          };
+          
+          fs.writeFileSync('latest.json', JSON.stringify(latest, null, 2));
+        "
+
+    - name: Upload Windows App to Actions
       uses: actions/upload-artifact@v4
       with:
         name: streamify-windows
         path: src-tauri/target/release/bundle/
 
-    # 7. יוצר Release חדש בכל פעם שעושים Push!
-    - name: Create GitHub Release and Upload Windows App
+    - name: Create GitHub Release and Upload Files
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: latest-build # בדיוק אותו שם!
+        tag_name: latest-build
         name: Streamify (Latest Auto-Build)
         files: |
+          latest.json
           src-tauri/target/release/bundle/msi/*.msi
+          src-tauri/target/release/bundle/msi/*.zip
+          src-tauri/target/release/bundle/msi/*.sig
           src-tauri/target/release/bundle/nsis/*.exe
+          src-tauri/target/release/bundle/nsis/*.zip
+          src-tauri/target/release/bundle/nsis/*.sig
