@@ -266,6 +266,7 @@ const App: React.FC = () => {
     const [showLogs, setShowLogs] = useState(false);
     const [globalLoading, setGlobalLoading] = useState<string | null>(null);
     const [isAppReady, setIsAppReady] = useState(false); // To prevent UI flashing before async load
+    const [updateAvailable, setUpdateAvailable] = useState(false);
     const wasPlayingRef = useRef(false); // Track playback state across network/app interruptions
     const [isListening, setIsListening] = useState(false);
     const [confirmModal, setConfirmModal] = useState<{
@@ -479,6 +480,39 @@ const App: React.FC = () => {
             listenerPromise.then(listener => listener.remove());
         };
     }, []);
+
+    // בודק בשקט מול הגיטהאב אם יש עדכון חדש זמין
+    useEffect(() => {
+        const checkUpdateAvailability = async () => {
+            if (!Capacitor.isNativePlatform()) return; // רלוונטי רק לאנדרואיד
+            try {
+                const res = await fetch('https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build');
+                if (!res.ok) return;
+                
+                const data = await res.json();
+                const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
+                
+                if (updateAsset) {
+                    // לוקח את תאריך העלאת הקובץ לגיטהאב והופך אותו למספר
+                    const serverDate = new Date(updateAsset.updated_at).getTime();
+                    // בודק מתי הלקוח עדכן בפעם האחרונה
+                    const localDateStr = localStorage.getItem('streamify_app_version_date');
+                    const localDate = localDateStr ? parseInt(localDateStr, 10) : 0;
+                    
+                    // אם הקובץ בענן חדש יותר ממה שיש ללקוח - מדליק את החיווי!
+                    if (serverDate > localDate) {
+                        setUpdateAvailable(true);
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to check for updates silently", e);
+            }
+        };
+
+        if (isAppReady) {
+            checkUpdateAvailability();
+        }
+    }, [isAppReady]);    
     // --- LOAD INITIAL DATA (ASYNC) ---
     useEffect(() => {
         const initApp = async () => {
@@ -1609,29 +1643,35 @@ const App: React.FC = () => {
     };
 
     const checkForInternalUpdates = async () => {
-        // --- הבדיקה החדשה: האם אנחנו בווינדוס (Tauri) או בדפדפן? ---
         if (!Capacitor.isNativePlatform()) {
             setConfirmModal({
-                isOpen: true, 
-                title: "עדכון גרסה", 
-                message: "עדכון פנימי נתמך במכשירי אנדרואיד בלבד. במחשב, העדכונים מוחלים אוטומטית או דורשים הורדת התקנה חדשה.",
-                onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), 
-                isAlertOnly: true
+                isOpen: true, title: "עדכון גרסה", 
+                message: "עדכון פנימי נתמך באנדרואיד בלבד. במחשב זה אוטומטי.",
+                onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
             });
             return;
         }
-        // -----------------------------------------------------------
 
         setGlobalLoading("מוריד עדכון פנימי...");
         try {
+            // מביא את התאריך החדש כדי לשמור אותו בזיכרון של הטלפון
+            const res = await fetch('https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build');
+            const data = await res.json();
+            const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
+            const newVersionDate = updateAsset ? new Date(updateAsset.updated_at).getTime() : new Date().getTime();
+
             const downloadUrl = "https://github.com/shlomoashl/streamify-app/releases/download/latest-build/update.zip";
             
             const result = await CapacitorUpdater.download({
                 url: downloadUrl,
-                version: new Date().getTime().toString(), 
+                version: newVersionDate.toString(), 
             });
             
             setGlobalLoading("מתקין ומרענן...");
+            // שומרים את תאריך העדכון ומכבים את נורית ההתראה
+            localStorage.setItem('streamify_app_version_date', newVersionDate.toString());
+            setUpdateAvailable(false); 
+            
             await CapacitorUpdater.set(result); 
         } catch (e) {
             console.error('Update failed', e);
@@ -2357,21 +2397,31 @@ const App: React.FC = () => {
                                     <div className="flex justify-between items-center">
                                         <h1 className="text-2xl font-bold">שלום</h1>
                                         <div className="flex items-center gap-3">
-                                            
-                                            {/* כפתור העדכון עם חץ הורדה (מוצג רק באנדרואיד) */}
+                                 
                                             {Capacitor.isNativePlatform() && (
-                                                <button
-                                                    onClick={checkForInternalUpdates}
-                                                    className="flex items-center gap-2 px-3 py-1.5 bg-spotify-primary text-black hover:scale-105 active:scale-95 rounded-full transition-all font-bold text-sm shadow-lg"
-                                                    title="בדוק עדכון לאפליקציה"
-                                                >
-                                                    <span>עדכון</span>
-                                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                                        <polyline points="7 10 12 15 17 10"></polyline>
-                                                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                                                    </svg>
-                                                </button>
+                                                <div className="relative">
+                                                    <button
+                                                        onClick={checkForInternalUpdates}
+                                                        className={`flex items-center gap-2 px-3 py-1.5 hover:scale-105 active:scale-95 rounded-full transition-all font-bold text-sm shadow-lg ${updateAvailable ? 'bg-green-500 text-white' : 'bg-spotify-primary text-black'}`}
+                                                        title="בדוק עדכון לאפליקציה"
+                                                    >
+                                                        {/* הטקסט מתחלף אם יש עדכון */}
+                                                        <span>{updateAvailable ? 'עדכון זמין!' : 'עדכון'}</span>
+                                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                                            <polyline points="7 10 12 15 17 10"></polyline>
+                                                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                                                        </svg>
+                                                    </button>
+                                                    
+                                                    {/* הנקודה האדומה המהבהבת (מופיעה רק כשיש עדכון באמת) */}
+                                                    {updateAvailable && (
+                                                        <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                                            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 shadow-md border border-white"></span>
+                                                        </span>
+                                                    )}
+                                                </div>
                                             )}
 
                                             {/* כפתורי הלוגים וההתנתקות למובייל */}
