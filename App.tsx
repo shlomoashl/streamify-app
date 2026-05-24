@@ -1661,9 +1661,11 @@ const App: React.FC = () => {
     const checkForInternalUpdates = async () => {
         if (!Capacitor.isNativePlatform()) {
             setConfirmModal({
-                isOpen: true, title: "עדכון גרסה", 
+                isOpen: true,
+                title: "עדכון גרסה",
                 message: "עדכון פנימי נתמך באנדרואיד בלבד.",
-                onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
+                onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+                isAlertOnly: true
             });
             return;
         }
@@ -1671,73 +1673,85 @@ const App: React.FC = () => {
         const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
         setGlobalLoading("מוריד עדכון פנימי...");
-        
+
         try {
             setUpdateStatusMsg("1/5: מחפש עדכון מול שרתי גיטהאב...");
             await delay(500);
-            
-            const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/latest?nocache=${Date.now()}`);
-            
-            // התיקון שלך: וידוא תקינות התשובה
-            if (!res.ok) throw new Error("שגיאה בקבלת נתוני גרסה מגיטהאב");
-            
+
+            const res = await fetch(
+                `https://api.github.com/repos/shlomoashl/streamify-app/releases/latest?nocache=${Date.now()}`
+            );
+
+            if (!res.ok) {
+                throw new Error("שגיאה בקבלת נתוני גרסה מגיטהאב");
+            }
+
             const data = await res.json();
-            const tagName = data.tag_name; 
-            
-            if (!tagName) throw new Error("לא נמצאה תגית גרסה תקינה בשרת");
-            
+            const tagName = data.tag_name;
+
+            if (!tagName) {
+                throw new Error("לא נמצאה תגית גרסה תקינה בשרת");
+            }
+
             setUpdateStatusMsg(`2/5: נמצאה גרסה ${tagName}! מנתח נתוני שרת...`);
             await delay(1000);
-            
-            const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
-            if (!updateAsset) throw new Error("קובץ update.zip לא נמצא בשרת");
+
+            const updateAsset = data.assets?.find((a: any) => a.name === "update.zip");
+
+            if (!updateAsset) {
+                throw new Error("קובץ update.zip לא נמצא בשרת");
+            }
 
             const serverDate = new Date(updateAsset.updated_at).getTime();
             const downloadUrl = updateAsset.browser_download_url;
-            
+
             setUpdateStatusMsg(`3/5: מוריד את גרסה ${tagName}...`);
-            
+
             const result = await CapacitorUpdater.download({
-                url: downloadUrl, 
-                version: tagName, 
+                url: downloadUrl,
+                version: tagName,
             });
-            
-            setUpdateStatusMsg(`4/5: גרסה ${tagName} הורדה בהצלחה! מכין התקנה...`);
-            await delay(1000); 
-            
-            // שומרים את העדכון כ"ממתין"
-            localStorage.setItem('streamify_pending_update', serverDate.toString());
-            setUpdateAvailable(false); 
-                        
-            setUpdateStatusMsg(`5/5: מתקין את ${tagName}... האפליקציה תתרענן מיד!`);
-            await delay(1500); 
-            
-            // דיבוג: בודקים את הבאנדל שירד ואת המצב אחרי ה-set
+
             console.log("Downloaded bundle:", result);
-            await CapacitorUpdater.set(result); 
-            
-            const current = await CapacitorUpdater.current();
-            console.log("Current bundle after set:", current);
-            
-            // ריסטארט
+
+            setUpdateStatusMsg(`4/5: גרסה ${tagName} הורדה בהצלחה! מכין התקנה...`);
+            await delay(1000);
+
+            localStorage.setItem("streamify_pending_update", serverDate.toString());
+            setUpdateAvailable(false);
+
+            setUpdateStatusMsg(`5/5: מעדכן וסוגר את האפליקציה... פתחו אותה מחדש להשלמת העדכון`);
+            await delay(1500);
+
             const updaterAny = CapacitorUpdater as any;
-            if (typeof updaterAny.reload === 'function') {
-                await updaterAny.reload();
+
+            if (typeof updaterAny.setNext === "function") {
+                await updaterAny.setNext(result);
+                console.log("Bundle set as next:", result);
             } else {
-                setTimeout(() => {
-                    window.location.reload();
-                }, 3000);
+                await CapacitorUpdater.set(result);
+                console.log("Bundle set directly:", result);
             }
-            
+
+            await delay(1000);
+
+            setGlobalLoading(null);
+
+            CapacitorApp.exitApp();
+
         } catch (e: any) {
-            // ניקוי הממתין במקרה של כישלון
-            localStorage.removeItem('streamify_pending_update');
+            localStorage.removeItem("streamify_pending_update");
+
             setUpdateStatusMsg(`שגיאה: ${e.message}`);
+
             setTimeout(() => {
                 setGlobalLoading(null);
                 setConfirmModal({
-                    isOpen: true, title: "שגיאת עדכון", message: e.message || 'שגיאה לא ידועה.',
-                    onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
+                    isOpen: true,
+                    title: "שגיאת עדכון",
+                    message: e.message || "שגיאה לא ידועה.",
+                    onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+                    isAlertOnly: true
                 });
             }, 5000);
         }
