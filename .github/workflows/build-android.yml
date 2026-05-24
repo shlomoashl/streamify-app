@@ -38,8 +38,9 @@ jobs:
 
     # 5.5 --- התוספת החדשה: דוחס את העיצוב (תיקיית dist) לקובץ ZIP ---
     - name: Create OTA Update Zip
-      run: cd dist && zip -r ../update.zip *
-
+      run: |
+        cd dist
+        zip -r ../update.zip *
     # 6. מעביר את קבצי האתר לתוך תיקיית האנדרואיד
     - name: Sync Capacitor
       run: npx cap sync android
@@ -69,13 +70,14 @@ jobs:
         name: streamify-app-release.apk
         path: android/app/build/outputs/apk/release/app-release.apk
 
-    # 10. מעדכן את ה-Release הקיים ודורס (מוחק) את הקבצים הישנים!
-    - name: Create Dynamic Release
+    # 10. יוצר Release חדש עם מספר גרסה רץ אוטומטי
+    - name: Update Release and Overwrite Artifacts
       uses: ncipollo/release-action@v1
       with:
         tag: "v1.0.${{ github.run_number }}"
         name: "Streamify v1.0.${{ github.run_number }}"
         makeLatest: true
         allowUpdates: true
+        replacesArtifacts: true
         artifacts: "android/app/build/outputs/apk/release/app-release.apk,update.zip"
         token: ${{ secrets.GITHUB_TOKEN }}
