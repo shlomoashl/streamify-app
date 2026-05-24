@@ -70,12 +70,12 @@ jobs:
         path: android/app/build/outputs/apk/release/app-release.apk
 
     # 10. מעדכן את ה-Release הקיים ודורס (מוחק) את הקבצים הישנים!
-    - name: Update Release and Overwrite Artifacts
+    - name: Create Dynamic Release
       uses: ncipollo/release-action@v1
       with:
-        tag: latest-build
-        name: Streamify (Latest Auto-Build)
+        tag: "v1.0.${{ github.run_number }}"
+        name: "Streamify v1.0.${{ github.run_number }}"
+        makeLatest: true
         allowUpdates: true
-        replacesArtifacts: true
         artifacts: "android/app/build/outputs/apk/release/app-release.apk,update.zip"
         token: ${{ secrets.GITHUB_TOKEN }}

@@ -481,13 +481,12 @@ const App: React.FC = () => {
         };
     }, []);
 
-// בודק בשקט מול הגיטהאב אם יש עדכון חדש זמין
     useEffect(() => {
         const checkUpdateAvailability = async () => {
             if (!Capacitor.isNativePlatform()) return; 
             try {
-                // התיקון: מבקש את המידע עם חותמת הזמן של השנייה הנוכחית
-                const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build?t=${Date.now()}`);
+                // מבקש תמיד את הגרסה האחרונה ביותר שפורסמה
+                const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/latest`);
                 if (!res.ok) return;
                 
                 const data = await res.json();
@@ -496,8 +495,14 @@ const App: React.FC = () => {
                 if (updateAsset) {
                     const serverDate = new Date(updateAsset.updated_at).getTime();
                     const localDateStr = localStorage.getItem('streamify_app_version_date');
-                    const localDate = localDateStr ? parseInt(localDateStr, 10) : 0;
                     
+                    // טיפול בהתקנה ראשונה - שומרים את התאריך ולא מקפיצים עדכון
+                    if (!localDateStr) {
+                        localStorage.setItem('streamify_app_version_date', serverDate.toString());
+                        return;
+                    }
+                    
+                    const localDate = parseInt(localDateStr, 10);
                     if (serverDate > localDate) {
                         setUpdateAvailable(true);
                     }
@@ -510,7 +515,8 @@ const App: React.FC = () => {
         if (isAppReady) {
             checkUpdateAvailability();
         }
-    }, [isAppReady]);   
+    }, [isAppReady]);
+
     // --- LOAD INITIAL DATA (ASYNC) ---
     useEffect(() => {
         const initApp = async () => {
@@ -1640,53 +1646,53 @@ const App: React.FC = () => {
         }
     };
 
-    const checkForInternalUpdates = async () => {
-        if (!Capacitor.isNativePlatform()) return;
+const checkForInternalUpdates = async () => {
+        if (!Capacitor.isNativePlatform()) {
+            setConfirmModal({
+                isOpen: true, title: "עדכון גרסה", 
+                message: "עדכון פנימי נתמך באנדרואיד בלבד. במחשב זה אוטומטי.",
+                onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
+            });
+            return;
+        }
 
-        logger.info("[Updater] מתחיל בדיקת עדכון...");
-        setGlobalLoading("בודק עדכון...");
-
+        setGlobalLoading("מוריד עדכון פנימי...");
         try {
-            // הוספת חותמת זמן כדי למנוע קאש של ה-CDN של גיטהאב
-            const timestamp = Date.now();
-            const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build?t=${timestamp}`);
-            
-            if (!res.ok) throw new Error(`גיטהאב לא עונה: ${res.status}`);
-            
+            // מביא את הגרסה האחרונה
+            const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/latest`);
             const data = await res.json();
             const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
             
             if (!updateAsset) {
-                logger.error("[Updater] קובץ update.zip לא נמצא ב-Release!");
-                return;
+                throw new Error("קובץ העדכון לא נמצא בשרת");
             }
 
-            // הורדה עם חותמת זמן בסוף הקישור כדי להכריח הורדה טרייה
-            const downloadUrl = `${updateAsset.browser_download_url}?t=${timestamp}`;
-            logger.info(`[Updater] מוריד מהקישור: ${downloadUrl}`);
+            const newVersionDate = new Date(updateAsset.updated_at).getTime();
+
+            // הכתובת כעת ייחודית לכל גרסה (למשל .../download/v1.0.45/update.zip) - אין שום סיכוי לקאש!
+            const downloadUrl = updateAsset.browser_download_url;
             
-            setGlobalLoading("מוריד...");
             const result = await CapacitorUpdater.download({
                 url: downloadUrl,
-                version: updateAsset.updated_at, 
+                version: newVersionDate.toString(), 
             });
             
-            logger.info("[Updater] הורדה הצליחה! מחיל שינויים...");
-            setGlobalLoading("מתקין...");
+            setGlobalLoading("מתקין ומרענן...");
+            localStorage.setItem('streamify_app_version_date', newVersionDate.toString());
+            setUpdateAvailable(false); 
             
-            await CapacitorUpdater.set(result);
-            logger.info("[Updater] העדכון הוחל בהצלחה.");
-        } catch (e: any) {
-            logger.error(`[Updater] שגיאה: ${e.message}`);
+            await CapacitorUpdater.set(result); 
+        } catch (e) {
+            console.error('Update failed', e);
             setConfirmModal({
-                isOpen: true, title: "שגיאת עדכון", message: e.message,
+                isOpen: true, title: "שגיאה", message: "נכשל בהורדת העדכון.",
                 onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
             });
         } finally {
             setGlobalLoading(null);
         }
     };
-
+    
     const handleLogout = () => { 
         setConfirmModal({
             isOpen: true, title: "התנתקות", message: "האם להתנתק?",
@@ -2396,33 +2402,28 @@ const App: React.FC = () => {
 
                         return (
                             <>
-                                <div className="sticky top-0 z-[100] p-4 pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4 bg-spotify-elevated/95 backdrop-blur-sm shadow-md">
+                        <div className="sticky top-0 z-10 p-4 pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4 bg-spotify-elevated/95 backdrop-blur-sm shadow-md">
                                     <div className="flex justify-between items-center">
                                         <h1 className="text-2xl font-bold">שלום</h1>
-                                        
-                                        {/* קונטיינר אחד בלבד לכל הכפתורים */}
-                                        <div className="flex items-center gap-2">
-                                            
-                                            {/* כפתור לוגים - זמין תמיד */}
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); setShowLogs(true); }} 
-                                                className="p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-all shadow-md" 
-                                                title="צפה בלוגים"
-                                            > 
-                                                <TerminalIcon className="w-5 h-5" /> 
-                                            </button>
-                                            
-                                            {/* כפתור עדכון - רק באנדרואיד */}
+                                        <div className="flex items-center gap-3">
+                                 
                                             {Capacitor.isNativePlatform() && (
                                                 <div className="relative">
                                                     <button
-                                                        onClick={(e) => { e.stopPropagation(); checkForInternalUpdates(); }}
-                                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all font-bold text-sm shadow-lg ${updateAvailable ? 'bg-green-500 text-white' : 'bg-spotify-primary text-black'}`}
+                                                        onClick={checkForInternalUpdates}
+                                                        className={`flex items-center gap-2 px-3 py-1.5 hover:scale-105 active:scale-95 rounded-full transition-all font-bold text-sm shadow-lg ${updateAvailable ? 'bg-green-500 text-white' : 'bg-spotify-primary text-black'}`}
                                                         title="בדוק עדכון לאפליקציה"
                                                     >
+                                                        {/* הטקסט מתחלף אם יש עדכון */}
                                                         <span>{updateAvailable ? 'עדכון זמין!' : 'עדכון'}</span>
+                                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                                            <polyline points="7 10 12 15 17 10"></polyline>
+                                                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                                                        </svg>
                                                     </button>
                                                     
+                                                    {/* הנקודה האדומה המהבהבת (מופיעה רק כשיש עדכון באמת) */}
                                                     {updateAvailable && (
                                                         <span className="absolute -top-1 -right-1 flex h-3 w-3">
                                                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
@@ -2432,10 +2433,11 @@ const App: React.FC = () => {
                                                 </div>
                                             )}
 
-                                            {/* כפתור התנתקות - לכל המכשירים */}
-                                            <button onClick={handleLogout} className="p-2 bg-white/10 rounded-full text-white hover:bg-white/20" title="התנתק"> 
-                                                <LogOutIcon className="w-5 h-5" /> 
-                                            </button>
+                                            {/* כפתורי הלוגים וההתנתקות למובייל */}
+                                            <div className="flex gap-2 md:hidden">
+                                                <button onClick={() => setShowLogs(true)} className="p-3 bg-white/10 rounded-full text-white hover:bg-white/20" title="לוגים"> <TerminalIcon className="w-5 h-5" /> </button>
+                                                <button onClick={handleLogout} className="p-3 bg-white/10 rounded-full text-white hover:bg-white/20" title="התנתק"> <LogOutIcon className="w-5 h-5" /> </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -2883,7 +2885,7 @@ const App: React.FC = () => {
                     {activeTab === 'streamify' && (
                         <div className="flex-1 p-4 overflow-y-auto no-scrollbar pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4">
                             <div className="flex justify-between items-center mb-6 px-1">
-                                <h1 className="text-2xl font-bold">מומלצים עעעעבורך</h1>
+                                <h1 className="text-2xl font-bold">מומלצים עבורך</h1>
                                 <button 
                                     onClick={() => loadStreamifyRecommendations(true)} 
                                     className="p-2 bg-white/10 hover:bg-white/20 rounded-full flex items-center transition text-gray-400 hover:text-white"
