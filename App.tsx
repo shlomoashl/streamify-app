@@ -1712,21 +1712,27 @@ const App: React.FC = () => {
                 version: tagName,
             });
 
-            setUpdateStatusMsg(`4/5: גרסה ${tagName} הורדה בהצלחה! מכין התקנה...`);
-            await delay(1000);
+            console.log("Downloaded bundle:", result);
 
             localStorage.setItem("streamify_pending_update", serverDate.toString());
             setUpdateAvailable(false);
 
-            setUpdateStatusMsg(`5/5: מעדכן וסוגר את האפליקציה...`);
+            setUpdateStatusMsg("4/5: העדכון ירד בהצלחה. מכין להפעלה הבאה...");
+            await delay(1000);
+
+            const updaterAny = CapacitorUpdater as any;
+
+            if (typeof updaterAny.next !== "function") {
+                throw new Error("CapacitorUpdater.next לא קיים בגרסת הפלאגין. צריך לעדכן את @capgo/capacitor-updater");
+            }
+
+            await updaterAny.next({ id: result.id });
+
+            setUpdateStatusMsg("5/5: העדכון מוכן. סוגר את האפליקציה... פתחו אותה מחדש להשלמת העדכון");
             await delay(1500);
 
-            await CapacitorUpdater.set(result);
-
-            // בלי reload בכלל
-            setTimeout(() => {
-                CapacitorApp.exitApp();
-            }, 1000);
+            setGlobalLoading(null);
+            CapacitorApp.exitApp();
 
         } catch (e: any) {
             localStorage.removeItem("streamify_pending_update");
