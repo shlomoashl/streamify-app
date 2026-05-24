@@ -23,7 +23,11 @@ import { audioService } from './AudioService';
 import { logger } from './Logger';
 import LogViewer from './components/LogViewer';
 import { storageService } from './StorageService';
-
+if (Capacitor.isNativePlatform()) {
+    CapacitorUpdater.notifyAppReady().catch(err => {
+        console.error("notifyAppReady failed", err);
+    });
+}
 const StreamifyMedia = registerPlugin<StreamifyMediaPlugin>('StreamifyMedia');
 // --- קבועים והגדרות מערכת ---
 const STREAMIFY_KEYWORDS = [
@@ -489,11 +493,6 @@ const App: React.FC = () => {
             CapacitorUpdater.current().then(c => {
                 console.log("Current bundle on app start:", c);
             }).catch(console.error);
-
-            // השהיה קלה כדי לוודא שהאפליקציה באמת סיימה init לפני האישור
-            setTimeout(() => {
-                CapacitorUpdater.notifyAppReady().catch(console.error);
-            }, 1000);
 
             // בדיקת עדכון ממתין ואישור סופי שלו
             const pendingUpdate = localStorage.getItem('streamify_pending_update');
