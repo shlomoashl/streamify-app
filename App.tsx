@@ -1736,6 +1736,10 @@ const App: React.FC = () => {
                 }
             } catch (error) {
                 setGlobalLoading(null);
+                
+                // השורה הזו תקפיץ לנו את השגיאה המדויקת!
+                alert("פרטי השגיאה: " + (error.message || error));
+                
                 console.error("שגיאה בבדיקת עדכונים:", error);
                 setConfirmModal({
                     isOpen: true,
