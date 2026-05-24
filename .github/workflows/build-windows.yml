@@ -28,14 +28,13 @@ jobs:
     - name: Install dependencies
       run: npm install
 
-    # יצירת סקריפט עם סיומת .cjs
+    # [מעודכן] הסקריפט עכשיו שומר את הגרסה כמשתנה סביבה כדי ליצור את התגית
     - name: Prepare Version Bump Script
       shell: bash
       run: |
         cat << 'EOF' > bump-version.cjs
         const fs = require('fs');
         
-        // 1. קריאה ועדכון package.json
         const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
         let [major, minor, patch] = pkg.version.split('.').map(Number);
         patch += 1;
@@ -43,19 +42,21 @@ jobs:
         pkg.version = newVersion;
         fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
         
-        // 2. קריאה ועדכון src-tauri/tauri.conf.json
         const tauriPath = 'src-tauri/tauri.conf.json';
         if (fs.existsSync(tauriPath)) {
           const tauri = JSON.parse(fs.readFileSync(tauriPath, 'utf8'));
           tauri.package.version = newVersion;
           fs.writeFileSync(tauriPath, JSON.stringify(tauri, null, 2));
-          console.log('Successfully bumped version to ' + newVersion);
-        } else {
-          console.log('Warning: tauri.conf.json not found');
         }
+        
+        // יצירת משתנה סביבה לגיטהאב שבו תאוחסן התגית החדשה
+        const envFile = process.env.GITHUB_ENV;
+        if (envFile) {
+          fs.appendFileSync(envFile, `NEW_VERSION=v${newVersion}\n`);
+        }
+        console.log('Version bumped to ' + newVersion);
         EOF
 
-    # הרצת הסקריפט המתוקן
     - name: Execute Version Bump
       run: node bump-version.cjs
 
@@ -76,7 +77,7 @@ jobs:
         TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
         TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
-    # יצירת סקריפט latest עם סיומת .cjs
+    # [מעודכן] הקישור לקובץ ה-ZIP יצביע עכשיו על התגית האמיתית הספציפית
     - name: Generate latest.json for Updater
       shell: bash
       run: |
@@ -101,21 +102,19 @@ jobs:
         
         const latest = {
             version: version,
-            notes: 'עדכון אוטומטי חדש זמין!',
+            notes: 'עדכון אוטומטי לגרסה ' + version,
             pub_date: new Date().toISOString(),
             platforms: {
                 'windows-x86_64': {
                     signature: sigContent,
-                    url: 'https://github.com/shlomoashl/streamify-app/releases/download/latest-build/' + zipName
+                    url: 'https://github.com/shlomoashl/streamify-app/releases/download/v' + version + '/' + zipName
                 }
             }
         };
         
         fs.writeFileSync('latest.json', JSON.stringify(latest, null, 2));
-        console.log('Generated latest.json for version ' + version);
         EOF
 
-    # הרצת הסקריפט המתוקן
     - name: Execute Latest JSON Generation
       run: node generate-latest.cjs
 
@@ -125,11 +124,12 @@ jobs:
         name: streamify-windows
         path: src-tauri/target/release/bundle/
 
+    # [מעודכן] כאן אנחנו יוצרים את ה-Release בעזרת המשתנה עם השם האמיתי!
     - name: Create GitHub Release and Upload Windows App
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: latest-build
-        name: Streamify (Latest Auto-Build)
+        tag_name: ${{ env.NEW_VERSION }}
+        name: Streamify ${{ env.NEW_VERSION }}
         files: |
           latest.json
           src-tauri/target/release/bundle/msi/*.msi
