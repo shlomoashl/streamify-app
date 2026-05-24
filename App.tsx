@@ -2169,9 +2169,13 @@ const App: React.FC = () => {
     const renderLoader = () => {
         if (!globalLoading) return null;
         return (
-            <div className="fixed inset-0 bg-black/80 z-[150] flex flex-col items-center justify-center p-4 animate-fade-in" onClick={e => e.stopPropagation()}>
+            // הוספנו onClick שמאפס את מסך הטעינה כדי לשחרר לך את המסך
+            <div className="fixed inset-0 bg-black/80 z-[150] flex flex-col items-center justify-center p-4 animate-fade-in" onClick={() => setGlobalLoading(null)}>
                 <LoaderIcon className="w-12 h-12 text-spotify-primary animate-spin mb-4" />
                 <div className="text-white font-bold text-lg animate-pulse">{globalLoading}</div>
+                <div className="mt-8 text-gray-400 text-sm font-normal bg-black/50 px-4 py-2 rounded-full cursor-pointer">
+                    (לחץ בכל מקום כדי להעלים מסך זה ולפתוח לוגים)
+                </div>
             </div>
         );
     };
