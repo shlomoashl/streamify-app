@@ -397,7 +397,8 @@ const App: React.FC = () => {
         showLogs: showLogs,
         playerExpanded: playerState.isExpanded,
         activeTab: activeTab,
-        selectedPlaylist: selectedPlaylist
+        selectedPlaylist: selectedPlaylist,
+        prevTab: prevTab
     });
 
     // 2. מעדכן את האוגר בכל פעם שמשהו משתנה במסך
@@ -413,7 +414,8 @@ const App: React.FC = () => {
             showLogs: showLogs,
             playerExpanded: playerState.isExpanded,
             activeTab: activeTab,
-            selectedPlaylist: selectedPlaylist
+            selectedPlaylist: selectedPlaylist,
+            prevTab: prevTab
         };
     }, [
         confirmModal.isOpen, inputModal.isOpen, bulkImportState.isOpen, manageUsersState.isOpen, 
@@ -444,14 +446,9 @@ const App: React.FC = () => {
             if (state.playerExpanded) { setPlayerState(prev => ({...prev, isExpanded: false})); return; }
 
             // עדיפות 4: ניווט טאבים (דפים)
+            // עדיפות 4: ניווט טאבים (דפים) - חוזר בדיוק למקום ממנו הגעת
             if (state.activeTab === 'playlist') {
-                if (state.selectedPlaylist?.id.startsWith('temp-')) {
-                    // אם זה פלייליסט זמני מהחיפוש, נחזור לחיפוש
-                    setActiveTab('search');
-                } else {
-                    // אחרת, נחזור לדף הבית
-                    setActiveTab('home');
-                }
+                setActiveTab(state.prevTab);
                 return;
             }
 
@@ -683,6 +680,15 @@ const App: React.FC = () => {
     useEffect(() => {
         if (activeTab === 'streamify') {
             loadStreamifyRecommendations();
+        }
+    }, [activeTab]);
+
+    const [prevTab, setPrevTab] = useState<ViewState>('home');
+
+    // מאזין חכם שמזהה החלפת טאבים וזוכר תמיד את הטאב האחרון (שהוא לא פלייליסט)
+    useEffect(() => {
+        if (activeTab !== 'playlist') {
+            setPrevTab(activeTab);
         }
     }, [activeTab]);
 
@@ -2722,9 +2728,8 @@ const App: React.FC = () => {
                                                                             {type !== 'artist' && (
                                                                                 <button 
                                                                                     onClick={(e) => handleDirectPlay(e, res)}
-                                                                                    className={`absolute bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-[0_4px_12px_rgba(0,0,0,0.6)] hover:scale-110 active:scale-95 transition-transform z-20
-                                                                                    w-8 h-8 md:w-10 md:h-10
-                                                                                    ${type === 'album' ? 'bottom-0 left-0' : 'bottom-1.5 left-1.5'}`}
+                                                                                    // עדכנו את המחלקה הבאה: מחקנו את 'lg:opacity-0 group-hover:opacity-100' והשארנו רק 'opacity-100'
+                                                                                    className="absolute bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-[0_4px_12px_rgba(0,0,0,0.6)] hover:scale-110 active:scale-95 transition-transform z-20 w-8 h-8 md:w-10 md:h-10 bottom-2 left-2 opacity-100"
                                                                                 >
                                                                                     {isPlaying ? <PauseIcon className="w-4 h-4 md:w-5 md:h-5" fill /> : <PlayIcon className="w-4 h-4 md:w-5 md:h-5 ml-0.5" fill />}
                                                                                 </button>
@@ -2787,7 +2792,7 @@ const App: React.FC = () => {
                                                     
                                                     <button 
                                                         onClick={(e) => handleDirectPlay(e, res)}
-                                                        className="absolute bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-[0_4px_12px_rgba(0,0,0,0.6)] hover:scale-110 active:scale-95 transition-transform z-20 w-8 h-8 md:w-10 md:h-10 bottom-2 left-2 opacity-100 lg:opacity-0 group-hover:opacity-100"
+                                                        className="absolute bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-[0_4px_12px_rgba(0,0,0,0.6)] hover:scale-110 active:scale-95 transition-transform z-20 w-8 h-8 md:w-10 md:h-10 bottom-2 left-2 opacity-100"
                                                     >
                                                         {isPlaying ? <PauseIcon className="w-4 h-4 md:w-5 md:h-5" fill /> : <PlayIcon className="w-4 h-4 md:w-5 md:h-5 ml-0.5" fill />}
                                                     </button>
@@ -2805,7 +2810,7 @@ const App: React.FC = () => {
                     {activeTab === 'playlist' && selectedPlaylist && (
                         <div>
                             <div className="sticky top-0 z-10 p-4 pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4 bg-spotify-base/95 backdrop-blur flex items-center gap-4 border-b border-white/5">
-                                {selectedPlaylist.id.startsWith('temp-') && ( <button onClick={() => { setSelectedPlaylist(null); setActiveTab('search'); }} className="p-2 bg-black/40 rounded-full hover:bg-white/20"> <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg> </button> )}
+                                <button onClick={() => { setSelectedPlaylist(null); setActiveTab(prevTab); }} className="p-2 bg-black/40 rounded-full hover:bg-white/20"> <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg> </button>
                                 <h1 className={`font-bold text-xl truncate ${!selectedPlaylist.isLikedSongs && !selectedPlaylist.id.startsWith('temp-') ? 'cursor-pointer' : ''}`} onClick={() => { if (selectedPlaylist.isLikedSongs || selectedPlaylist.id.startsWith('temp-') || selectedPlaylist.externalId) return; setInputModal({ isOpen: true, title: "שם חדש:", defaultValue: selectedPlaylist.name, onConfirm: (val) => { if(val) apiRenameItem(selectedPlaylist.id, val, 'playlist'); } }); setInputModalValue(selectedPlaylist.name); }}> {selectedPlaylist.name} </h1>
                             </div>
                             <div className="p-6 flex flex-col items-center text-center bg-gradient-to-b from-white/5 to-transparent">
