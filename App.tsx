@@ -682,7 +682,7 @@ const App: React.FC = () => {
                 if (Capacitor.isNativePlatform()) {
                     CapacitorUpdater.notifyAppReady();
                 }                
-טט            }
+            }
         };
         initApp();
     }, []);
