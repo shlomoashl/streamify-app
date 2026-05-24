@@ -482,18 +482,25 @@ const App: React.FC = () => {
         };
     }, []);
 
-    // ניהול עדכונים: איתות חיים מיידי ואישור עדכון ממתין
+    // ניהול עדכונים: איתות חיים מושהה ואישור עדכון ממתין
     useEffect(() => {
         if (Capacitor.isNativePlatform()) {
-            // משדר שהאפליקציה חיה ונושמת (מונע מחיקת עדכון שגויה)
-            CapacitorUpdater.notifyAppReady().catch(console.error);
+            // דיבוג: בודק איזה באנדל רץ עכשיו באמת
+            CapacitorUpdater.current().then(c => {
+                console.log("Current bundle on app start:", c);
+            }).catch(console.error);
+
+            // השהיה קלה כדי לוודא שהאפליקציה באמת סיימה init לפני האישור
+            setTimeout(() => {
+                CapacitorUpdater.notifyAppReady().catch(console.error);
+            }, 1000);
 
             // בדיקת עדכון ממתין ואישור סופי שלו
             const pendingUpdate = localStorage.getItem('streamify_pending_update');
             if (pendingUpdate) {
                 localStorage.setItem('streamify_app_version_date', pendingUpdate);
                 localStorage.removeItem('streamify_pending_update');
-                setUpdateAvailable(false); // כיבוי חיווי העדכון בממשק
+                setUpdateAvailable(false); 
                 console.log("העדכון הפנימי הותקן בהצלחה!");
             }
         }
@@ -1707,13 +1714,18 @@ const App: React.FC = () => {
             // שומרים את העדכון כ"ממתין"
             localStorage.setItem('streamify_pending_update', serverDate.toString());
             setUpdateAvailable(false); 
-            
+                        
             setUpdateStatusMsg(`5/5: מתקין את ${tagName}... האפליקציה תתרענן מיד!`);
             await delay(1500); 
             
+            // דיבוג: בודקים את הבאנדל שירד ואת המצב אחרי ה-set
+            console.log("Downloaded bundle:", result);
             await CapacitorUpdater.set(result); 
             
-            // התיקון שלך: בקרת TypeScript בטוחה לריסטארט
+            const current = await CapacitorUpdater.current();
+            console.log("Current bundle after set:", current);
+            
+            // ריסטארט
             const updaterAny = CapacitorUpdater as any;
             if (typeof updaterAny.reload === 'function') {
                 await updaterAny.reload();
