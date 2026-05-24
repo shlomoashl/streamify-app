@@ -1662,14 +1662,14 @@ const App: React.FC = () => {
         setGlobalLoading("מוריד עדכון פנימי...");
         
         try {
-            setUpdateStatusMsg("1/6: מחפש עדכון מול שרתי גיטהאב...");
+            setUpdateStatusMsg("1/5: מחפש עדכון מול שרתי גיטהאב...");
             await delay(500);
             
             const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/latest?nocache=${Date.now()}`);
             const data = await res.json();
             const tagName = data.tag_name || "לא ידוע";
             
-            setUpdateStatusMsg(`2/6: נמצאה גרסה ${tagName}! מנתח נתוני שרת...`);
+            setUpdateStatusMsg(`2/5: נמצאה גרסה ${tagName}! מנתח נתוני שרת...`);
             await delay(1000);
             
             const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
@@ -1677,33 +1677,28 @@ const App: React.FC = () => {
 
             const serverDate = new Date(updateAsset.updated_at).getTime();
             const uniqueCapgoVersion = `${serverDate}_${Math.floor(Math.random() * 100000)}`;
-            const initialDownloadUrl = `${updateAsset.browser_download_url}?nocache=${Date.now()}`;
             
-            // --- הפתרון הקסום: פענוח ה-Redirect לפני ההורדה ---
-            setUpdateStatusMsg(`3/6: מפענח כתובת עקיפת חסימות...`);
-            // עושים בקשה שקטה כדי שהדפדפן ימצא לנו את השרת האמיתי של הקובץ
-            const redirectRes = await fetch(initialDownloadUrl, { method: 'HEAD' });
-            const finalDirectUrl = redirectRes.url; 
+            // אנחנו מעבירים את הכתובת המקורית של גיטהאב ישירות לפלאגין (בלי ה-fetch interceptor שהרס לנו)
+            const downloadUrl = `${updateAsset.browser_download_url}?nocache=${Date.now()}`;
             
-            setUpdateStatusMsg(`4/6: מוריד גרסה ${tagName} ישירות מהשרת...`);
-            // מעבירים לפלאגין את הכתובת האמיתית הסופית!
+            setUpdateStatusMsg(`3/5: מוריד את גרסה ${tagName}...`);
+            
             const result = await CapacitorUpdater.download({
-                url: finalDirectUrl, 
+                url: downloadUrl, 
                 version: uniqueCapgoVersion, 
             });
             
-            setUpdateStatusMsg(`5/6: גרסה ${tagName} הורדה בהצלחה! מכין נתונים...`);
+            setUpdateStatusMsg(`4/5: גרסה ${tagName} הורדה בהצלחה! מכין נתונים...`);
             await delay(1500); 
             
             localStorage.setItem('streamify_app_version_date', serverDate.toString());
             setUpdateAvailable(false); 
             
-            setUpdateStatusMsg(`6/6: מתקין את ${tagName}... האפליקציה תופעל מחדש!`);
+            setUpdateStatusMsg(`5/5: מתקין את ${tagName}... האפליקציה תופעל מחדש!`);
             await delay(1500); 
             
             await CapacitorUpdater.set(result); 
             
-            // למקרה שהריסטארט האוטומטי נתקע
             setTimeout(() => {
                 window.location.reload();
             }, 3000);
@@ -1719,7 +1714,6 @@ const App: React.FC = () => {
             }, 5000);
         }
     };
-
     const handleLogout = () => { 
         setConfirmModal({
             isOpen: true, title: "התנתקות", message: "האם להתנתק?",
