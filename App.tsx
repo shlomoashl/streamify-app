@@ -245,6 +245,14 @@ const App: React.FC = () => {
     // Init state with empty/default, then load async
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [activeTab, setActiveTab] = useState<ViewState>('home');
+    const [prevTab, setPrevTab] = useState<ViewState>('home');
+
+    // מאזין חכם שמזהה החלפת טאבים וזוכר תמיד את הטאב האחרון (שהוא לא פלייליסט)
+    useEffect(() => {
+        if (activeTab !== 'playlist') {
+            setPrevTab(activeTab);
+        }
+    }, [activeTab]);
     const [streamifyResults, setStreamifyResults] = useState<YouTubeSearchResult[]>([]);
     const [isLoadingStreamify, setIsLoadingStreamify] = useState(false);
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -259,7 +267,6 @@ const App: React.FC = () => {
     const [isAppReady, setIsAppReady] = useState(false); // To prevent UI flashing before async load
     const wasPlayingRef = useRef(false); // Track playback state across network/app interruptions
     const [isListening, setIsListening] = useState(false);
-
     const [confirmModal, setConfirmModal] = useState<{
         isOpen: boolean;
         title: string;
@@ -680,15 +687,6 @@ const App: React.FC = () => {
     useEffect(() => {
         if (activeTab === 'streamify') {
             loadStreamifyRecommendations();
-        }
-    }, [activeTab]);
-
-    const [prevTab, setPrevTab] = useState<ViewState>('home');
-
-    // מאזין חכם שמזהה החלפת טאבים וזוכר תמיד את הטאב האחרון (שהוא לא פלייליסט)
-    useEffect(() => {
-        if (activeTab !== 'playlist') {
-            setPrevTab(activeTab);
         }
     }, [activeTab]);
 
