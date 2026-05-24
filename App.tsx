@@ -501,6 +501,27 @@ const App: React.FC = () => {
         };
     }, []);
 
+    useEffect(() => {
+        // פונקציה שקטה שבודקת עדכונים לווינדוס ברקע
+        const checkWindowsUpdatesSilently = async () => {
+            // מוודא שאנחנו רצים בתוך Tauri (ווינדוס)
+            if ('__TAURI__' in window) {
+                try {
+                    const { shouldUpdate } = await checkUpdate();
+                    if (shouldUpdate) {
+                        // מדליק את הנורה הירוקה של הכפתור!
+                        setUpdateAvailable(true); 
+                    }
+                } catch (error) {
+                    console.error("שגיאה בבדיקת עדכוני רקע בווינדוס:", error);
+                }
+            }
+        };
+
+        // הפעלת הפונקציה בטעינה ראשונית של האפליקציה
+        checkWindowsUpdatesSilently();
+    }, []);    
+    
     // ניהול עדכונים: איתות חיים מושהה ואישור עדכון ממתין
     useEffect(() => {
         if (Capacitor.isNativePlatform()) {
@@ -2533,7 +2554,8 @@ const App: React.FC = () => {
                                         <h1 className="text-2xl font-bold">שלום</h1>
                                         <div className="flex items-center gap-3">
                                  
-                                            {Capacitor.isNativePlatform() && (
+
+                                            {(Capacitor.isNativePlatform() || '__TAURI__' in window) && (
                                                 <div className="flex items-center gap-3">
                                                     {/* כפתור הלוגים נמחק מכאן */}
                                                     <div className="relative">

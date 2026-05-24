@@ -28,16 +28,20 @@ jobs:
     - name: Install dependencies
       run: npm install
 
+
     - name: Bump Version (package.json & tauri.conf.json)
       run: |
         node -e "
           const fs = require('fs');
           
-          // 1. קידום גרסה ב-package.json
+          // 1. קריאת הגרסה וקידום המספר
           const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           let [major, minor, patch] = pkg.version.split('.').map(Number);
           patch += 1;
-          const newVersion = \`\${major}.\${minor}.\${patch}\`;
+          
+          // חיבור מחרוזות פשוט שמונע התנגשויות ב-GitHub Actions
+          const newVersion = major + '.' + minor + '.' + patch;
+          
           pkg.version = newVersion;
           fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
           
@@ -51,7 +55,6 @@ jobs:
           
           console.log('Version bumped to ' + newVersion);
         "
-
     - name: Commit version bump
       shell: bash
       run: |
