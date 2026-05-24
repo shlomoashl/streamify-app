@@ -1648,14 +1648,28 @@ const App: React.FC = () => {
     };
 
     const checkForInternalUpdates = async () => {
-        if (!Capacitor.isNativePlatform()) return;
+        if (!Capacitor.isNativePlatform()) {
+            setConfirmModal({
+                isOpen: true, title: "עדכון גרסה", 
+                message: "עדכון פנימי נתמך באנדרואיד בלבד.",
+                onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
+            });
+            return;
+        }
+
+        // פונקציית עזר ליצירת השהייה יזומה (כדי שתוכל לראות את השלבים מתחלפים)
+        const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
         setGlobalLoading("מוריד עדכון פנימי...");
-        setUpdateStatusMsg("1/5: פונה לשרת גיטהאב...");
         
         try {
-            const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/latest`);
-            setUpdateStatusMsg("2/5: מנתח נתוני שרת...");
+            setUpdateStatusMsg("1/5: מחפש עדכון מול שרתי גיטהאב...");
+            await delay(1000); // המתנה של שנייה
+            
+            const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/latest?nocache=${Date.now()}`);
+            
+            setUpdateStatusMsg("2/5: קורא את נתוני העדכון...");
+            await delay(1000);
             const data = await res.json();
             
             const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
@@ -1664,27 +1678,37 @@ const App: React.FC = () => {
                 throw new Error("קובץ העדכון (update.zip) לא נמצא בשרת");
             }
 
-            const newVersionDate = new Date(updateAsset.updated_at).getTime();
-            const downloadUrl = updateAsset.browser_download_url;
+            const serverDate = new Date(updateAsset.updated_at).getTime();
+            const uniqueCapgoVersion = `${serverDate}_${Math.floor(Math.random() * 100000)}`;
+            const downloadUrl = `${updateAsset.browser_download_url}?nocache=${Date.now()}`;
             
-            setUpdateStatusMsg(`3/5: מתחיל הורדת קובץ מגיטהאב...`);
-
-            // כאן לרוב התהליך נתקע!
+            setUpdateStatusMsg(`3/5: מוריד את הקובץ החדש מגיטהאב...`);
+            // כאן אין השהייה יזומה כי ההורדה עצמה לוקחת זמן
             const result = await CapacitorUpdater.download({
                 url: downloadUrl,
-                version: newVersionDate.toString(), 
+                version: uniqueCapgoVersion, 
             });
             
-            setUpdateStatusMsg("4/5: ההורדה הסתיימה! מאשר...");
-            localStorage.setItem('streamify_app_version_date', newVersionDate.toString());
+            // עכשיו, לפני הריסטארט, אנחנו מכריחים את האפליקציה לחכות כדי שתראה את ההצלחה
+            setUpdateStatusMsg("4/5: ההורדה הסתיימה בהצלחה! מכין נתונים...");
+            await delay(1500); 
+            
+            localStorage.setItem('streamify_app_version_date', serverDate.toString());
             setUpdateAvailable(false); 
             
-            setUpdateStatusMsg("5/5: מתקין ומרענן את האפליקציה...");
+            setUpdateStatusMsg("5/5: מתקין ומרענן... האפליקציה תופעל מחדש מיד!");
+            await delay(1500); // נותן לך לראות את שלב 5 לפני שהמסך הופך לשחור
+            
+            // מפעיל את העדכון והריסטארט המיידי
             await CapacitorUpdater.set(result); 
             
+            // גיבוי למקרה שהפלאגין לא עושה ריסטארט אוטומטי
+            setTimeout(() => {
+                window.location.reload();
+            }, 3000);
+            
         } catch (e: any) {
-            setUpdateStatusMsg(`שגיאה בתהליך: ${e.message || 'לא ידוע'}`);
-            // נשאיר את מסך הטעינה פתוח לעוד 5 שניות כדי שתוכל לקרוא את השגיאה, ואז נסגור
+            setUpdateStatusMsg(`שגיאה: ${e.message}`);
             setTimeout(() => {
                 setGlobalLoading(null);
                 setConfirmModal({
@@ -2909,7 +2933,7 @@ const App: React.FC = () => {
                     {activeTab === 'streamify' && (
                         <div className="flex-1 p-4 overflow-y-auto no-scrollbar pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4">
                             <div className="flex justify-between items-center mb-6 px-1">
-                                <h1 className="text-2xl font-bold">מומלצים עבבורך</h1>
+                                <h1 className="text-2xl font-bold">מומלצים עבבנחנחנחורך</h1>
                                 <button 
                                     onClick={() => loadStreamifyRecommendations(true)} 
                                     className="p-2 bg-white/10 hover:bg-white/20 rounded-full flex items-center transition text-gray-400 hover:text-white"
