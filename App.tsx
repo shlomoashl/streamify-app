@@ -644,7 +644,7 @@ const App: React.FC = () => {
                 if (Capacitor.isNativePlatform()) {
                     CapacitorUpdater.notifyAppReady();
                 }                
-            }
+טט            }
         };
         initApp();
     }, []);
@@ -2298,23 +2298,12 @@ const App: React.FC = () => {
 
             <div className="flex flex-1 overflow-hidden relative">
                 <nav className="hidden md:flex flex-col w-64 bg-black px-4 pt-4 pb-2 h-full">
+                    {/* ביטלנו פה את הלוגו החריג כדי שייכנס לתוך הרשימה */}
                     <div className="space-y-1 mt-4">
-                        
-                        {/* בלוק הלוגו המעוצב בשורה אחת עם כפתור העדכון הפנימי */}
-                        <div className="flex items-center justify-between gap-2 w-full pb-2 px-1">
-                            <button onClick={() => setActiveTab('streamify')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors flex-1 text-right ${activeTab==='streamify'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
-                                <MusicIcon className="w-6 h-6" /> <span className="font-medium text-lg">Streamify</span> 
-                            </button>
-                            <button 
-                                onClick={checkForInternalUpdates} 
-                                className="p-2.5 bg-white/5 hover:bg-white/15 text-spotify-primary hover:text-white rounded-full transition-all flex items-center justify-center border border-white/5 shadow-md active:scale-95"
-                                title="בדוק עדכון פנימי"
-                            >
-                                <RefreshCcwIcon className="w-4 h-4" />
-                            </button>
-                        </div>                
+                        <button onClick={() => setActiveTab('streamify')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='streamify'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
+                            <MusicIcon className="w-6 h-6" /> <span className="font-medium text-lg">Streamify</span> 
+                        </button>
                         <button onClick={() => setActiveTab('home')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='home'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
-                            
                             <HomeIcon /> <span className="font-medium text-lg">בית</span> 
                         </button>
                         <button onClick={() => setActiveTab('search')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='search'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
@@ -2325,7 +2314,7 @@ const App: React.FC = () => {
                                 <HeartIcon filled className="text-spotify-primary"/> <span className="font-medium text-lg">שירים שאהבתם</span> 
                             </button>
                         )}
-                    </div>                    
+                    </div>                                    
                     <div className="border-t border-white/20 mt-2 pt-2 flex-1 min-h-0 overflow-y-auto no-scrollbar">
                         <div className="flex justify-start items-center text-sm font-bold text-gray-400 mb-2 px-1">
                             <div className="flex flex-col gap-1 w-full">
@@ -2364,12 +2353,32 @@ const App: React.FC = () => {
 
                         return (
                             <>
-                                <div className="sticky top-0 z-10 p-4 pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4 bg-spotify-elevated/95 backdrop-blur-sm shadow-md">
+                        <div className="sticky top-0 z-10 p-4 pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4 bg-spotify-elevated/95 backdrop-blur-sm shadow-md">
                                     <div className="flex justify-between items-center">
                                         <h1 className="text-2xl font-bold">שלום</h1>
-                                        <div className="flex gap-2 md:hidden">
-                                            <button onClick={() => setShowLogs(true)} className="p-3 bg-white/10 rounded-full text-white hover:bg-white/20" title="לוגים"> <TerminalIcon className="w-5 h-5" /> </button>
-                                            <button onClick={handleLogout} className="p-3 bg-white/10 rounded-full text-white hover:bg-white/20" title="התנתק"> <LogOutIcon className="w-5 h-5" /> </button>
+                                        <div className="flex items-center gap-3">
+                                            
+                                            {/* כפתור העדכון עם חץ הורדה (מוצג רק באנדרואיד) */}
+                                            {Capacitor.isNativePlatform() && (
+                                                <button
+                                                    onClick={checkForInternalUpdates}
+                                                    className="flex items-center gap-2 px-3 py-1.5 bg-spotify-primary text-black hover:scale-105 active:scale-95 rounded-full transition-all font-bold text-sm shadow-lg"
+                                                    title="בדוק עדכון לאפליקציה"
+                                                >
+                                                    <span>עדכון</span>
+                                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                                    </svg>
+                                                </button>
+                                            )}
+
+                                            {/* כפתורי הלוגים וההתנתקות למובייל */}
+                                            <div className="flex gap-2 md:hidden">
+                                                <button onClick={() => setShowLogs(true)} className="p-3 bg-white/10 rounded-full text-white hover:bg-white/20" title="לוגים"> <TerminalIcon className="w-5 h-5" /> </button>
+                                                <button onClick={handleLogout} className="p-3 bg-white/10 rounded-full text-white hover:bg-white/20" title="התנתק"> <LogOutIcon className="w-5 h-5" /> </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
