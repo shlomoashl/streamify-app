@@ -2966,7 +2966,7 @@ const App: React.FC = () => {
                     {activeTab === 'streamify' && (
                         <div className="flex-1 p-4 overflow-y-auto no-scrollbar pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4">
                             <div className="flex justify-between items-center mb-6 px-1">
-                                <h1 className="text-2xl font-bold">מומלצים עבורךךךךךך</h1>
+                                <h1 className="text-2xl font-bold">מומלצים עבורך</h1>
                                 <button 
                                     onClick={() => loadStreamifyRecommendations(true)} 
                                     className="p-2 bg-white/10 hover:bg-white/20 rounded-full flex items-center transition text-gray-400 hover:text-white"
