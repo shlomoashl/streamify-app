@@ -2,69 +2,78 @@ name: Build Windows App
 
 on:
   push:
-    branches: [ main, master ]
-  workflow_dispatch:
+    branches: [ main, master ] # עכשיו הבוט ירוץ *רק* כשאתה עושה push רגיל
+  workflow_dispatch: # מאפשר לך להריץ גם ידנית מהאתר
 
 jobs:
   build-windows:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: write # הרשאה הכרחית כדי שהבוט יוכל לכתוב לעמוד ה-Releases
 
     steps:
+    # 1. מוריד את הקוד לשרת הווינדוס
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
 
+    # 2. מתקין Node.js
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
 
+    # 3. מתקין את שפת Rust
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
 
+    # 4. מתקין את כל הספריות של הפרויקט
     - name: Install dependencies
       run: npm install
 
-
-    - name: Bump Version (package.json & tauri.conf.json)
+    # [חדש] 4.5. יצירת סקריפט חסין שגיאות לקידום הגרסה בקבצים
+    - name: Prepare Version Bump Script
+      shell: bash
       run: |
-        node -e "
-          const fs = require('fs');
-          
-          // 1. קריאת הגרסה וקידום המספר
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          let [major, minor, patch] = pkg.version.split('.').map(Number);
-          patch += 1;
-          
-          // חיבור מחרוזות פשוט שמונע התנגשויות ב-GitHub Actions
-          const newVersion = major + '.' + minor + '.' + patch;
-          
-          pkg.version = newVersion;
-          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
-          
-          // 2. קידום גרסה ב-tauri.conf.json
-          const tauriPath = 'tauri.conf.json';
-          if (fs.existsSync(tauriPath)) {
-            const tauri = JSON.parse(fs.readFileSync(tauriPath, 'utf8'));
-            tauri.package.version = newVersion;
-            fs.writeFileSync(tauriPath, JSON.stringify(tauri, null, 2));
-          }
-          
-          console.log('Version bumped to ' + newVersion);
-        "
-    - name: Commit version bump
+        cat << 'EOF' > bump-version.js
+        const fs = require('fs');
+        
+        // 1. קריאה ועדכון package.json
+        const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+        let [major, minor, patch] = pkg.version.split('.').map(Number);
+        patch += 1;
+        const newVersion = major + '.' + minor + '.' + patch;
+        pkg.version = newVersion;
+        fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+        
+        // 2. קריאה ועדכון src-tauri/tauri.conf.json
+        const tauriPath = 'src-tauri/tauri.conf.json';
+        if (fs.existsSync(tauriPath)) {
+          const tauri = JSON.parse(fs.readFileSync(tauriPath, 'utf8'));
+          tauri.package.version = newVersion;
+          fs.writeFileSync(tauriPath, JSON.stringify(tauri, null, 2));
+          console.log('Successfully bumped version to ' + newVersion);
+        } else {
+          console.log('Warning: tauri.conf.json not found');
+        }
+        EOF
+
+    # [חדש] הרצת סקריפט קידום הגרסה
+    - name: Execute Version Bump
+      run: node bump-version.js
+
+    # [חדש] שמירת הגרסה החדשה בחזרה לגיט (כמו באנדרואיד)
+    - name: Commit and Push Version Bump
       shell: bash
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add package.json tauri.conf.json
-        # בודק אם יש שינויים לפני שעושה קומיט כדי למנוע שגיאות
+        git add package.json src-tauri/tauri.conf.json
         git diff --quiet && git diff --staged --quiet || git commit -m "chore: bump windows version [skip ci]"
         git push
 
+    # 5. מקמפל את אפליקציית הווינדוס! (הוספו משתני החתימה עבור ה-Updater)
     - name: Build Tauri Windows App
       run: npm run build:windows
       env:
@@ -73,52 +82,61 @@ jobs:
         TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
         TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
+    # [חדש] 5.5. יצירת קובץ ה-latest.json עבור מנגנון העדכון של Tauri
     - name: Generate latest.json for Updater
+      shell: bash
       run: |
-        node -e "
-          const fs = require('fs');
-          const path = require('path');
-          const { version } = require('./package.json');
-          
-          let sigContent = '', zipName = '';
-          const dirs = ['./src-tauri/target/release/bundle/nsis', './src-tauri/target/release/bundle/msi'];
-          
-          for (const dir of dirs) {
-              if (fs.existsSync(dir)) {
-                  const sigFile = fs.readdirSync(dir).find(f => f.endsWith('.zip.sig'));
-                  if (sigFile) {
-                      sigContent = fs.readFileSync(path.join(dir, sigFile), 'utf8');
-                      zipName = sigFile.replace('.sig', '');
-                      break;
-                  }
-              }
-          }
-          
-          const latest = {
-              version: version,
-              notes: 'עדכון אוטומטי חדש זמין!',
-              pub_date: new Date().toISOString(),
-              platforms: {
-                  'windows-x86_64': {
-                      signature: sigContent,
-                      url: 'https://github.com/shlomoashl/streamify-app/releases/download/latest-build/' + zipName
-                  }
-              }
-          };
-          
-          fs.writeFileSync('latest.json', JSON.stringify(latest, null, 2));
-        "
+        cat << 'EOF' > generate-latest.js
+        const fs = require('fs');
+        const path = require('path');
+        const { version } = require('./package.json');
+        
+        let sigContent = '', zipName = '';
+        const dirs = ['./src-tauri/target/release/bundle/nsis', './src-tauri/target/release/bundle/msi'];
+        
+        for (const dir of dirs) {
+            if (fs.existsSync(dir)) {
+                const sigFile = fs.readdirSync(dir).find(f => f.endsWith('.zip.sig'));
+                if (sigFile) {
+                    sigContent = fs.readFileSync(path.join(dir, sigFile), 'utf8').trim();
+                    zipName = sigFile.replace('.sig', '');
+                    break;
+                }
+            }
+        }
+        
+        const latest = {
+            version: version,
+            notes: 'עדכון אוטומטי חדש זמין!',
+            pub_date: new Date().toISOString(),
+            platforms: {
+                'windows-x86_64': {
+                    signature: sigContent,
+                    url: 'https://github.com/shlomoashl/streamify-app/releases/download/latest-build/' + zipName
+                }
+            }
+        };
+        
+        fs.writeFileSync('latest.json', JSON.stringify(latest, null, 2));
+        console.log('Generated latest.json for version ' + version);
+        EOF
 
-    - name: Upload Windows App to Actions
+    # [חדש] הרצת מחולל קובץ ה-latest.json
+    - name: Execute Latest JSON Generation
+      run: node generate-latest.js
+
+    # 6. מעלה את קובץ ההתקנה כ-Artifact (לגיבוי רגיל)
+    - name: Upload Windows App
       uses: actions/upload-artifact@v4
       with:
         name: streamify-windows
         path: src-tauri/target/release/bundle/
 
-    - name: Create GitHub Release and Upload Files
+    # 7. יוצר Release חדש בכל פעם שעושים Push! (כולל קבצי ה-Updater והחתימות)
+    - name: Create GitHub Release and Upload Windows App
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: latest-build
+        tag_name: latest-build # בדיוק אותו שם!
         name: Streamify (Latest Auto-Build)
         files: |
           latest.json
