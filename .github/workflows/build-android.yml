@@ -69,12 +69,12 @@ jobs:
         name: streamify-app-release.apk
         path: android/app/build/outputs/apk/release/app-release.apk
 
-    # 10. יוצר Release חדש ומעלה גם את ה-APK וגם את קובץ העדכון!
-    - name: Create GitHub Release and Upload APK
-      uses: softprops/action-gh-release@v1
+    # 10. מעדכן את ה-Release הקיים ודורס (מוחק) את הקבצים הישנים!
+    - name: Update Release and Overwrite Artifacts
+      uses: ncipollo/release-action@v1
       with:
-        tag_name: latest-build
+        tag: latest-build
         name: Streamify (Latest Auto-Build)
-        files: |
-          android/app/build/outputs/apk/release/app-release.apk
-          update.zip
+        allowUpdates: true
+        replacesArtifacts: true
+        artifacts: "android/app/build/outputs/apk/release/app-release.apk,update.zip"

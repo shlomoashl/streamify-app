@@ -486,7 +486,7 @@ const App: React.FC = () => {
         const checkUpdateAvailability = async () => {
             if (!Capacitor.isNativePlatform()) return; // רלוונטי רק לאנדרואיד
             try {
-                const res = await fetch('https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build');
+                const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build?t=${new Date().getTime()}`);
                 if (!res.ok) return;
                 
                 const data = await res.json();
@@ -1655,7 +1655,7 @@ const App: React.FC = () => {
         setGlobalLoading("מוריד עדכון פנימי...");
         try {
             // מביא את התאריך החדש כדי לשמור אותו בזיכרון של הטלפון
-            const res = await fetch('https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build');
+            const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build?t=${new Date().getTime()}`);
             const data = await res.json();
             const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
             const newVersionDate = updateAsset ? new Date(updateAsset.updated_at).getTime() : new Date().getTime();
