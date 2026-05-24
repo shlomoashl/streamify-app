@@ -1660,7 +1660,7 @@ const App: React.FC = () => {
             const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
             const newVersionDate = updateAsset ? new Date(updateAsset.updated_at).getTime() : new Date().getTime();
 
-            const downloadUrl = "https://github.com/shlomoashl/streamify-app/releases/download/latest-build/update.zip";
+            const downloadUrl = `https://github.com/shlomoashl/streamify-app/releases/download/latest-build/update.zip?t=${newVersionDate}`;
             
             const result = await CapacitorUpdater.download({
                 url: downloadUrl,
