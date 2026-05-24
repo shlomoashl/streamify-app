@@ -47,6 +47,23 @@ const STREAMIFY_KEYWORDS = [
 ];
 // --- Utilities ---
 
+// הוסף את הפונקציה הזו באזור ה-Utilities למעלה
+const getLowResThumbnail = (url: string) => {
+    if (!url) return url;
+    
+    // טיפול בתמונות של YouTube Music (משנה את הגודל ל-120x120 במקום גדול יותר)
+    if (url.includes('=w') && url.includes('-h')) {
+        return url.replace(/=w\d+-h\d+/, '=w120-h120');
+    }
+    
+    // טיפול בתמונות רגילות של יוטיוב (מוריד מאיכות מקסימלית לאיכות בינונית/נמוכה)
+    if (url.includes('maxresdefault.jpg') || url.includes('hqdefault.jpg')) {
+        return url.replace('maxresdefault.jpg', 'mqdefault.jpg').replace('hqdefault.jpg', 'mqdefault.jpg');
+    }
+    
+    return url;
+};
+
 const parseDurationToSeconds = (dur: string | number): number => {
     if (typeof dur === 'number') return dur;
     if (!dur) return 0;
@@ -2419,11 +2436,11 @@ const App: React.FC = () => {
                 <nav className="hidden md:flex flex-col w-64 bg-black px-4 pt-4 pb-2 h-full">
                     {/* ביטלנו פה את הלוגו החריג כדי שייכנס לתוך הרשימה */}
                     <div className="space-y-1 mt-4">
-                        <button onClick={() => setActiveTab('streamify')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='streamify'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
-                            <MusicIcon className="w-6 h-6" /> <span className="font-medium text-lg">Streamify</span> 
-                        </button>
                         <button onClick={() => setActiveTab('home')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='home'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
                             <HomeIcon /> <span className="font-medium text-lg">בית</span> 
+                        </button>                        
+                        <button onClick={() => setActiveTab('streamify')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='streamify'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
+                            <MusicIcon className="w-6 h-6" /> <span className="font-medium text-lg">Streamify</span> 
                         </button>
                         <button onClick={() => setActiveTab('search')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='search'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
                             <SearchIcon /> <span className="font-medium text-lg">חיפוש</span> 
@@ -2479,15 +2496,7 @@ const App: React.FC = () => {
                                  
                                             {Capacitor.isNativePlatform() && (
                                                 <div className="flex items-center gap-3">
-                                                    {/* כפתור הלוגים החדש שמוצמד לעדכון */}
-                                                    <button 
-                                                        onClick={() => setShowLogs(true)} 
-                                                        className="p-2 bg-neutral-800 rounded-full text-gray-300 hover:text-white hover:bg-neutral-700 transition shadow-lg" 
-                                                        title="פתח לוגים"
-                                                    >
-                                                        <TerminalIcon className="w-5 h-5" />
-                                                    </button>
-
+                                                    {/* כפתור הלוגים נמחק מכאן */}
                                                     <div className="relative">
                                                         <button
                                                             onClick={checkForInternalUpdates}
@@ -2989,7 +2998,16 @@ const App: React.FC = () => {
                                                 className="flex flex-col p-4 bg-[#181818] hover:bg-[#282828] text-right rounded-2xl cursor-pointer transition-all relative group border border-transparent hover:border-white/10" dir="rtl">
                                                 
                                                 <div className="relative w-full aspect-square mb-4 flex items-center justify-center rounded-xl shadow-lg bg-[#282828] overflow-hidden">
-                                                    {res.thumbnail_url ? <img src={res.thumbnail_url} className="w-full h-full object-cover" /> : <PlaylistIcon className="w-2/5 h-2/5 text-gray-500" />}
+                                                    {res.thumbnail_url ? (
+                                                        <img 
+                                                            src={getLowResThumbnail(res.thumbnail_url)} 
+                                                            className="w-full h-full object-cover" 
+                                                            loading="lazy" 
+                                                            decoding="async"
+                                                        />                                                        
+                                                    ) : (
+                                                        <PlaylistIcon className="w-2/5 h-2/5 text-gray-500" />
+                                                    )}                                                    
                                                     
                                                     <button 
                                                         onClick={(e) => handleDirectPlay(e, res)}
@@ -3089,11 +3107,11 @@ const App: React.FC = () => {
                 onRemoveCurrentSong={handleRemoveCurrentSongClick} 
             />            
             <div className="md:hidden w-full flex-shrink-0 bg-neutral-900 border-t border-white/10 flex justify-around p-2 z-50 text-[10px]">
-                <button onClick={() => setActiveTab('streamify')} className={`flex flex-col items-center p-2 ${activeTab==='streamify'?'text-white':'text-gray-500'}`}> 
-                    <MusicIcon className="mb-1" /> Streamify 
-                </button>
                 <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center p-2 ${activeTab==='home'?'text-white':'text-gray-500'}`}> 
                     <HomeIcon className="mb-1" /> בית 
+                </button>            
+                <button onClick={() => setActiveTab('streamify')} className={`flex flex-col items-center p-2 ${activeTab==='streamify'?'text-white':'text-gray-500'}`}> 
+                    <MusicIcon className="mb-1" /> Streamify 
                 </button>
                 <button onClick={() => setActiveTab('search')} className={`flex flex-col items-center p-2 ${activeTab==='search'?'text-white':'text-gray-500'}`}> 
                     <SearchIcon className="mb-1" /> חיפוש 
