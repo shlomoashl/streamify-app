@@ -1662,47 +1662,48 @@ const App: React.FC = () => {
         setGlobalLoading("מוריד עדכון פנימי...");
         
         try {
-            setUpdateStatusMsg("1/5: מחפש עדכון מול שרתי גיטהאב...");
-            await delay(1000);
+            setUpdateStatusMsg("1/6: מחפש עדכון מול שרתי גיטהאב...");
+            await delay(500);
             
             const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/latest?nocache=${Date.now()}`);
             const data = await res.json();
-            
-            // --- החלק החשוב: חילוץ תגית הגרסה הרשמית מגיטהאב ---
             const tagName = data.tag_name || "לא ידוע";
             
-            // מציגים לך מיד את הגרסה שנמצאה בשרת
-            setUpdateStatusMsg(`2/5: נמצאה גרסה ${tagName}! מנתח נתוני שרת...`);
-            await delay(1500); // השהייה מכוונת כדי שתוכל לראות ולוודא את המספר
+            setUpdateStatusMsg(`2/6: נמצאה גרסה ${tagName}! מנתח נתוני שרת...`);
+            await delay(1000);
             
             const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
-            
-            if (!updateAsset) {
-                throw new Error(`קובץ העדכון (update.zip) לא נמצא בשרת עבור גרסה ${tagName}`);
-            }
+            if (!updateAsset) throw new Error("קובץ update.zip לא נמצא בשרת");
 
             const serverDate = new Date(updateAsset.updated_at).getTime();
             const uniqueCapgoVersion = `${serverDate}_${Math.floor(Math.random() * 100000)}`;
-            const downloadUrl = `${updateAsset.browser_download_url}?nocache=${Date.now()}`;
+            const initialDownloadUrl = `${updateAsset.browser_download_url}?nocache=${Date.now()}`;
             
-            // מעדכנים את הודעת ההורדה עם מספר הגרסה
-            setUpdateStatusMsg(`3/5: מוריד את קובץ הגרסה ${tagName}...`);
+            // --- הפתרון הקסום: פענוח ה-Redirect לפני ההורדה ---
+            setUpdateStatusMsg(`3/6: מפענח כתובת עקיפת חסימות...`);
+            // עושים בקשה שקטה כדי שהדפדפן ימצא לנו את השרת האמיתי של הקובץ
+            const redirectRes = await fetch(initialDownloadUrl, { method: 'HEAD' });
+            const finalDirectUrl = redirectRes.url; 
+            
+            setUpdateStatusMsg(`4/6: מוריד גרסה ${tagName} ישירות מהשרת...`);
+            // מעבירים לפלאגין את הכתובת האמיתית הסופית!
             const result = await CapacitorUpdater.download({
-                url: downloadUrl,
+                url: finalDirectUrl, 
                 version: uniqueCapgoVersion, 
             });
             
-            setUpdateStatusMsg(`4/5: גרסה ${tagName} הורדה בהצלחה! מכין נתונים...`);
+            setUpdateStatusMsg(`5/6: גרסה ${tagName} הורדה בהצלחה! מכין נתונים...`);
             await delay(1500); 
             
             localStorage.setItem('streamify_app_version_date', serverDate.toString());
             setUpdateAvailable(false); 
             
-            setUpdateStatusMsg(`5/5: מתקין את ${tagName}... האפליקציה תופעל מחדש!`);
+            setUpdateStatusMsg(`6/6: מתקין את ${tagName}... האפליקציה תופעל מחדש!`);
             await delay(1500); 
             
             await CapacitorUpdater.set(result); 
             
+            // למקרה שהריסטארט האוטומטי נתקע
             setTimeout(() => {
                 window.location.reload();
             }, 3000);

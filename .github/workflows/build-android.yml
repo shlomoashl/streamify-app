@@ -38,7 +38,7 @@ jobs:
 
     # 5.5 --- התוספת החדשה: דוחס את העיצוב (תיקיית dist) לקובץ ZIP ---
     - name: Create OTA Update Zip
-      run: cd dist && zip -r ../update.zip .
+      run: cd dist && zip -r ../update.zip *
 
     # 6. מעביר את קבצי האתר לתוך תיקיית האנדרואיד
     - name: Sync Capacitor
