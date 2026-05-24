@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import { KeepAwake } from '@capacitor-community/keep-awake';
+import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { Network } from '@capacitor/network';
 import { App as CapacitorApp } from '@capacitor/app';
 import { 
@@ -633,10 +634,12 @@ const App: React.FC = () => {
                 if (lastPlaylist) setSelectedPlaylist(lastPlaylist);
 
                 setIsAppReady(true);
+                CapacitorUpdater.notifyAppReady();
             } catch (e) {
                 console.error("Initialization failed:", e);
                 stateLoadedRef.current = true; // Allow saving even if load failed, to recover eventually
                 setIsAppReady(true); 
+                CapacitorUpdater.notifyAppReady();
             }
         };
         initApp();
@@ -1600,7 +1603,31 @@ const App: React.FC = () => {
             alert('אימייל לא תקין או קוד כניסה שגוי');
         }
     };
-    
+
+    const checkForInternalUpdates = async () => {
+        setGlobalLoading("מוריד עדכון פנימי...");
+        try {
+            // שים לב: עליך להחליף את הקישור הזה לקישור האמיתי שלך בגיטהאב!
+            const downloadUrl = "https://github.com/shlomoashl/streamify-app/releases/download/latest-build/update.zip";
+            
+            const result = await CapacitorUpdater.download({
+                url: downloadUrl,
+                version: new Date().getTime().toString(), 
+            });
+            
+            setGlobalLoading("מתקין ומרענן...");
+            await CapacitorUpdater.set(result); 
+        } catch (e) {
+            console.error('Update failed', e);
+            setConfirmModal({
+                isOpen: true, title: "שגיאה", message: "נכשל בהורדת העדכון.",
+                onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
+            });
+        } finally {
+            setGlobalLoading(null);
+        }
+    };
+
     const handleLogout = () => { 
         setConfirmModal({
             isOpen: true, title: "התנתקות", message: "האם להתנתק?",
@@ -2255,12 +2282,23 @@ const App: React.FC = () => {
 
             <div className="flex flex-1 overflow-hidden relative">
                 <nav className="hidden md:flex flex-col w-64 bg-black px-4 pt-4 pb-2 h-full">
-                    {/* ביטלנו פה את הלוגו החריג כדי שייכנס לתוך הרשימה */}
                     <div className="space-y-1 mt-4">
-                        <button onClick={() => setActiveTab('streamify')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='streamify'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
-                            <MusicIcon className="w-6 h-6" /> <span className="font-medium text-lg">Streamify</span> 
-                        </button>
+                        
+                        {/* בלוק הלוגו המעוצב בשורה אחת עם כפתור העדכון הפנימי */}
+                        <div className="flex items-center justify-between gap-2 w-full pb-2 px-1">
+                            <button onClick={() => setActiveTab('streamify')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors flex-1 text-right ${activeTab==='streamify'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
+                                <MusicIcon className="w-6 h-6" /> <span className="font-medium text-lg">Streamify</span> 
+                            </button>
+                            <button 
+                                onClick={checkForInternalUpdates} 
+                                className="p-2.5 bg-white/5 hover:bg-white/15 text-spotify-primary hover:text-white rounded-full transition-all flex items-center justify-center border border-white/5 shadow-md active:scale-95"
+                                title="בדוק עדכון פנימי"
+                            >
+                                <RefreshCcwIcon className="w-4 h-4" />
+                            </button>
+                        </div>                
                         <button onClick={() => setActiveTab('home')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='home'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 
+                            
                             <HomeIcon /> <span className="font-medium text-lg">בית</span> 
                         </button>
                         <button onClick={() => setActiveTab('search')} className={`flex items-center gap-4 py-2 px-4 rounded-lg transition-colors w-full text-right ${activeTab==='search'?'bg-white/20 text-white':'text-gray-400 hover:bg-white/10 hover:text-white'}`}> 

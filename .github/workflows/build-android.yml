@@ -2,34 +2,30 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ] # עכשיו הבוט ירוץ *רק* כשאתה עושה push רגיל
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # הרשאה חובה ליצירת Release
+      contents: write
 
     steps:
-    # 1. מוריד את הקוד שלך לשרת של גיטהאב
     - name: Checkout code
       uses: actions/checkout@v4
 
-    # 2. מתקין Node.js
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
 
-    # 3. מתקין Java
     - name: Setup Java
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '17'
 
-    # 4. מתקין את כל הספריות של הפרויקט שלך
     - name: Install dependencies
       run: npm install
 
@@ -39,6 +35,10 @@ jobs:
       env:        
         VITE_SERVER_URL: ${{ secrets.VITE_SERVER_URL }}
         VITE_APP_ENTRY_CODE: ${{ secrets.VITE_APP_ENTRY_CODE }}
+
+    # 5.5 --- התוספת החדשה: דוחס את העיצוב (תיקיית dist) לקובץ ZIP ---
+    - name: Create OTA Update Zip
+      run: cd dist && zip -r ../update.zip .
 
     # 6. מעביר את קבצי האתר לתוך תיקיית האנדרואיד
     - name: Sync Capacitor
@@ -62,17 +62,19 @@ jobs:
           -Pandroid.injected.signing.keyAlias=${{ secrets.KEY_ALIAS }} \
           -Pandroid.injected.signing.keyPassword=${{ secrets.KEY_PASSWORD }}
 
-    # 9. מעלה את קובץ ה-APK המוכן כ-Artifact (לגיבוי רגיל)
+    # 9. מעלה את קובץ ה-APK המוכן כ-Artifact
     - name: Upload Release APK
       uses: actions/upload-artifact@v4
       with:
         name: streamify-app-release.apk
         path: android/app/build/outputs/apk/release/app-release.apk
 
-    # 10. יוצר Release חדש בכל פעם שעושים Push!
+    # 10. יוצר Release חדש ומעלה גם את ה-APK וגם את קובץ העדכון!
     - name: Create GitHub Release and Upload APK
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: latest-build # שם קבוע!
+        tag_name: latest-build
         name: Streamify (Latest Auto-Build)
-        files: android/app/build/outputs/apk/release/app-release.apk
+        files: |
+          android/app/build/outputs/apk/release/app-release.apk
+          update.zip
