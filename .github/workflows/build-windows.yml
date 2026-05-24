@@ -2,41 +2,37 @@ name: Build Windows App
 
 on:
   push:
-    branches: [ main, master ] # עכשיו הבוט ירוץ *רק* כשאתה עושה push רגיל
-  workflow_dispatch: # מאפשר לך להריץ גם ידנית מהאתר
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build-windows:
     runs-on: windows-latest
     permissions:
-      contents: write # הרשאה הכרחית כדי שהבוט יוכל לכתוב לעמוד ה-Releases
+      contents: write
 
     steps:
-    # 1. מוריד את הקוד לשרת הווינדוס
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
 
-    # 2. מתקין Node.js
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
 
-    # 3. מתקין את שפת Rust
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
 
-    # 4. מתקין את כל הספריות של הפרויקט
     - name: Install dependencies
       run: npm install
 
-    # [חדש] 4.5. יצירת סקריפט חסין שגיאות לקידום הגרסה בקבצים
+    # יצירת סקריפט עם סיומת .cjs
     - name: Prepare Version Bump Script
       shell: bash
       run: |
-        cat << 'EOF' > bump-version.js
+        cat << 'EOF' > bump-version.cjs
         const fs = require('fs');
         
         // 1. קריאה ועדכון package.json
@@ -59,11 +55,10 @@ jobs:
         }
         EOF
 
-    # [חדש] הרצת סקריפט קידום הגרסה
+    # הרצת הסקריפט המתוקן
     - name: Execute Version Bump
-      run: node bump-version.js
+      run: node bump-version.cjs
 
-    # [חדש] שמירת הגרסה החדשה בחזרה לגיט (כמו באנדרואיד)
     - name: Commit and Push Version Bump
       shell: bash
       run: |
@@ -73,7 +68,6 @@ jobs:
         git diff --quiet && git diff --staged --quiet || git commit -m "chore: bump windows version [skip ci]"
         git push
 
-    # 5. מקמפל את אפליקציית הווינדוס! (הוספו משתני החתימה עבור ה-Updater)
     - name: Build Tauri Windows App
       run: npm run build:windows
       env:
@@ -82,11 +76,11 @@ jobs:
         TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
         TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
-    # [חדש] 5.5. יצירת קובץ ה-latest.json עבור מנגנון העדכון של Tauri
+    # יצירת סקריפט latest עם סיומת .cjs
     - name: Generate latest.json for Updater
       shell: bash
       run: |
-        cat << 'EOF' > generate-latest.js
+        cat << 'EOF' > generate-latest.cjs
         const fs = require('fs');
         const path = require('path');
         const { version } = require('./package.json');
@@ -121,22 +115,20 @@ jobs:
         console.log('Generated latest.json for version ' + version);
         EOF
 
-    # [חדש] הרצת מחולל קובץ ה-latest.json
+    # הרצת הסקריפט המתוקן
     - name: Execute Latest JSON Generation
-      run: node generate-latest.js
+      run: node generate-latest.cjs
 
-    # 6. מעלה את קובץ ההתקנה כ-Artifact (לגיבוי רגיל)
     - name: Upload Windows App
       uses: actions/upload-artifact@v4
       with:
         name: streamify-windows
         path: src-tauri/target/release/bundle/
 
-    # 7. יוצר Release חדש בכל פעם שעושים Push! (כולל קבצי ה-Updater והחתימות)
     - name: Create GitHub Release and Upload Windows App
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: latest-build # בדיוק אותו שם!
+        tag_name: latest-build
         name: Streamify (Latest Auto-Build)
         files: |
           latest.json
