@@ -634,12 +634,16 @@ const App: React.FC = () => {
                 if (lastPlaylist) setSelectedPlaylist(lastPlaylist);
 
                 setIsAppReady(true);
-                CapacitorUpdater.notifyAppReady();
+                if (Capacitor.isNativePlatform()) {
+                    CapacitorUpdater.notifyAppReady();
+                }                
             } catch (e) {
                 console.error("Initialization failed:", e);
                 stateLoadedRef.current = true; // Allow saving even if load failed, to recover eventually
                 setIsAppReady(true); 
-                CapacitorUpdater.notifyAppReady();
+                if (Capacitor.isNativePlatform()) {
+                    CapacitorUpdater.notifyAppReady();
+                }                
             }
         };
         initApp();
@@ -1605,9 +1609,21 @@ const App: React.FC = () => {
     };
 
     const checkForInternalUpdates = async () => {
+        // --- הבדיקה החדשה: האם אנחנו בווינדוס (Tauri) או בדפדפן? ---
+        if (!Capacitor.isNativePlatform()) {
+            setConfirmModal({
+                isOpen: true, 
+                title: "עדכון גרסה", 
+                message: "עדכון פנימי נתמך במכשירי אנדרואיד בלבד. במחשב, העדכונים מוחלים אוטומטית או דורשים הורדת התקנה חדשה.",
+                onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), 
+                isAlertOnly: true
+            });
+            return;
+        }
+        // -----------------------------------------------------------
+
         setGlobalLoading("מוריד עדכון פנימי...");
         try {
-            // שים לב: עליך להחליף את הקישור הזה לקישור האמיתי שלך בגיטהאב!
             const downloadUrl = "https://github.com/shlomoashl/streamify-app/releases/download/latest-build/update.zip";
             
             const result = await CapacitorUpdater.download({
