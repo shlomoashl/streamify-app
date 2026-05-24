@@ -1646,7 +1646,7 @@ const App: React.FC = () => {
         }
     };
 
-const checkForInternalUpdates = async () => {
+    const checkForInternalUpdates = async () => {
         if (!Capacitor.isNativePlatform()) {
             setConfirmModal({
                 isOpen: true, title: "עדכון גרסה", 
@@ -1657,39 +1657,57 @@ const checkForInternalUpdates = async () => {
         }
 
         setGlobalLoading("מוריד עדכון פנימי...");
+        logger.info("--- התחלת תהליך עדכון ידני ---");
+        
         try {
-            // מביא את הגרסה האחרונה
+            logger.info("פונה ל-GitHub API כדי לקבל את הגרסה האחרונה...");
             const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/latest`);
             const data = await res.json();
+            logger.info(`התקבלה תשובה מגיטהאב. תגית: ${data.tag_name || 'לא נמצאה'}`);
+
             const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
             
             if (!updateAsset) {
+                logger.error("קובץ update.zip לא נמצא בנכסי ה-Release.");
                 throw new Error("קובץ העדכון לא נמצא בשרת");
             }
 
             const newVersionDate = new Date(updateAsset.updated_at).getTime();
-
-            // הכתובת כעת ייחודית לכל גרסה (למשל .../download/v1.0.45/update.zip) - אין שום סיכוי לקאש!
             const downloadUrl = updateAsset.browser_download_url;
             
+            logger.info(`כתובת הורדה שאותרה: ${downloadUrl}`);
+            logger.info(`מזהה גרסה פנימית לרישום: ${newVersionDate}`);
+
+            logger.info("מתחיל הורדה דרך CapacitorUpdater...");
             const result = await CapacitorUpdater.download({
                 url: downloadUrl,
                 version: newVersionDate.toString(), 
             });
             
+            logger.info(`ההורדה הושלמה בהצלחה! התוצאה: ${JSON.stringify(result)}`);
+            
             setGlobalLoading("מתקין ומרענן...");
             localStorage.setItem('streamify_app_version_date', newVersionDate.toString());
             setUpdateAvailable(false); 
             
+            logger.info("מפעיל את העדכון (CapacitorUpdater.set)...");
             await CapacitorUpdater.set(result); 
-        } catch (e) {
-            console.error('Update failed', e);
+            
+            // שים לב: בדרך כלל האפליקציה עושה ריסטארט מיד אחרי השורה הזו
+            logger.info("העדכון הופעל. האפליקציה אמורה לבצע ריסטארט כעת.");
+            
+        } catch (e: any) {
+            logger.error("שגיאה קריטית בתהליך העדכון!");
+            logger.error(`הודעת שגיאה: ${e.message || e}`);
+            if (e.stack) logger.error(`Stack trace: ${e.stack}`);
+            
             setConfirmModal({
-                isOpen: true, title: "שגיאה", message: "נכשל בהורדת העדכון.",
+                isOpen: true, title: "שגיאה", message: `נכשל בעדכון: ${e.message || 'שגיאה לא ידועה. בדוק לוגים.'}`,
                 onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
             });
         } finally {
             setGlobalLoading(null);
+            logger.info("--- סיום בלוק העדכון ---");
         }
     };
 
@@ -2408,28 +2426,39 @@ const checkForInternalUpdates = async () => {
                                         <div className="flex items-center gap-3">
                                  
                                             {Capacitor.isNativePlatform() && (
-                                                <div className="relative">
-                                                    <button
-                                                        onClick={checkForInternalUpdates}
-                                                        className={`flex items-center gap-2 px-3 py-1.5 hover:scale-105 active:scale-95 rounded-full transition-all font-bold text-sm shadow-lg ${updateAvailable ? 'bg-green-500 text-white' : 'bg-spotify-primary text-black'}`}
-                                                        title="בדוק עדכון לאפליקציה"
+                                                <div className="flex items-center gap-3">
+                                                    {/* כפתור הלוגים החדש שמוצמד לעדכון */}
+                                                    <button 
+                                                        onClick={() => setShowLogs(true)} 
+                                                        className="p-2 bg-neutral-800 rounded-full text-gray-300 hover:text-white hover:bg-neutral-700 transition shadow-lg" 
+                                                        title="פתח לוגים"
                                                     >
-                                                        {/* הטקסט מתחלף אם יש עדכון */}
-                                                        <span>{updateAvailable ? 'עדכון זמין!' : 'עדכון'}</span>
-                                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                                            <polyline points="7 10 12 15 17 10"></polyline>
-                                                            <line x1="12" y1="15" x2="12" y2="3"></line>
-                                                        </svg>
+                                                        <TerminalIcon className="w-5 h-5" />
                                                     </button>
-                                                    
-                                                    {/* הנקודה האדומה המהבהבת (מופיעה רק כשיש עדכון באמת) */}
-                                                    {updateAvailable && (
-                                                        <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                                            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 shadow-md border border-white"></span>
-                                                        </span>
-                                                    )}
+
+                                                    <div className="relative">
+                                                        <button
+                                                            onClick={checkForInternalUpdates}
+                                                            className={`flex items-center gap-2 px-3 py-1.5 hover:scale-105 active:scale-95 rounded-full transition-all font-bold text-sm shadow-lg ${updateAvailable ? 'bg-green-500 text-white' : 'bg-spotify-primary text-black'}`}
+                                                            title="בדוק עדכון לאפליקציה"
+                                                        >
+                                                            {/* הטקסט מתחלף אם יש עדכון */}
+                                                            <span>{updateAvailable ? 'עדכון זמין!' : 'עדכון'}</span>
+                                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                                                <polyline points="7 10 12 15 17 10"></polyline>
+                                                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                                                            </svg>
+                                                        </button>
+                                                        
+                                                        {/* הנקודה האדומה המהבהבת */}
+                                                        {updateAvailable && (
+                                                            <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                                                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 shadow-md border border-white"></span>
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             )}
 
