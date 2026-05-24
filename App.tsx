@@ -265,6 +265,7 @@ const App: React.FC = () => {
     const [expandedHomeFolders, setExpandedHomeFolders] = useState<Set<string>>(new Set());
     const [showLogs, setShowLogs] = useState(false);
     const [globalLoading, setGlobalLoading] = useState<string | null>(null);
+    const [updateStatusMsg, setUpdateStatusMsg] = useState<string>('');
     const [isAppReady, setIsAppReady] = useState(false); // To prevent UI flashing before async load
     const [updateAvailable, setUpdateAvailable] = useState(false);
     const wasPlayingRef = useRef(false); // Track playback state across network/app interruptions
@@ -1647,67 +1648,50 @@ const App: React.FC = () => {
     };
 
     const checkForInternalUpdates = async () => {
-        if (!Capacitor.isNativePlatform()) {
-            setConfirmModal({
-                isOpen: true, title: "עדכון גרסה", 
-                message: "עדכון פנימי נתמך באנדרואיד בלבד. במחשב זה אוטומטי.",
-                onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
-            });
-            return;
-        }
+        if (!Capacitor.isNativePlatform()) return;
 
         setGlobalLoading("מוריד עדכון פנימי...");
-        logger.info("--- התחלת תהליך עדכון ידני ---");
+        setUpdateStatusMsg("1/5: פונה לשרת גיטהאב...");
         
         try {
-            logger.info("פונה ל-GitHub API כדי לקבל את הגרסה האחרונה...");
             const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/latest`);
+            setUpdateStatusMsg("2/5: מנתח נתוני שרת...");
             const data = await res.json();
-            logger.info(`התקבלה תשובה מגיטהאב. תגית: ${data.tag_name || 'לא נמצאה'}`);
-
+            
             const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
             
             if (!updateAsset) {
-                logger.error("קובץ update.zip לא נמצא בנכסי ה-Release.");
-                throw new Error("קובץ העדכון לא נמצא בשרת");
+                throw new Error("קובץ העדכון (update.zip) לא נמצא בשרת");
             }
 
             const newVersionDate = new Date(updateAsset.updated_at).getTime();
             const downloadUrl = updateAsset.browser_download_url;
             
-            logger.info(`כתובת הורדה שאותרה: ${downloadUrl}`);
-            logger.info(`מזהה גרסה פנימית לרישום: ${newVersionDate}`);
+            setUpdateStatusMsg(`3/5: מתחיל הורדת קובץ מגיטהאב...`);
 
-            logger.info("מתחיל הורדה דרך CapacitorUpdater...");
+            // כאן לרוב התהליך נתקע!
             const result = await CapacitorUpdater.download({
                 url: downloadUrl,
                 version: newVersionDate.toString(), 
             });
             
-            logger.info(`ההורדה הושלמה בהצלחה! התוצאה: ${JSON.stringify(result)}`);
-            
-            setGlobalLoading("מתקין ומרענן...");
+            setUpdateStatusMsg("4/5: ההורדה הסתיימה! מאשר...");
             localStorage.setItem('streamify_app_version_date', newVersionDate.toString());
             setUpdateAvailable(false); 
             
-            logger.info("מפעיל את העדכון (CapacitorUpdater.set)...");
+            setUpdateStatusMsg("5/5: מתקין ומרענן את האפליקציה...");
             await CapacitorUpdater.set(result); 
             
-            // שים לב: בדרך כלל האפליקציה עושה ריסטארט מיד אחרי השורה הזו
-            logger.info("העדכון הופעל. האפליקציה אמורה לבצע ריסטארט כעת.");
-            
         } catch (e: any) {
-            logger.error("שגיאה קריטית בתהליך העדכון!");
-            logger.error(`הודעת שגיאה: ${e.message || e}`);
-            if (e.stack) logger.error(`Stack trace: ${e.stack}`);
-            
-            setConfirmModal({
-                isOpen: true, title: "שגיאה", message: `נכשל בעדכון: ${e.message || 'שגיאה לא ידועה. בדוק לוגים.'}`,
-                onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
-            });
-        } finally {
-            setGlobalLoading(null);
-            logger.info("--- סיום בלוק העדכון ---");
+            setUpdateStatusMsg(`שגיאה בתהליך: ${e.message || 'לא ידוע'}`);
+            // נשאיר את מסך הטעינה פתוח לעוד 5 שניות כדי שתוכל לקרוא את השגיאה, ואז נסגור
+            setTimeout(() => {
+                setGlobalLoading(null);
+                setConfirmModal({
+                    isOpen: true, title: "שגיאת עדכון", message: e.message || 'שגיאה לא ידועה.',
+                    onConfirm: () => setConfirmModal(prev => ({...prev, isOpen: false})), isAlertOnly: true
+                });
+            }, 5000);
         }
     };
 
@@ -2169,12 +2153,19 @@ const App: React.FC = () => {
     const renderLoader = () => {
         if (!globalLoading) return null;
         return (
-            // הוספנו onClick שמאפס את מסך הטעינה כדי לשחרר לך את המסך
             <div className="fixed inset-0 bg-black/80 z-[150] flex flex-col items-center justify-center p-4 animate-fade-in" onClick={() => setGlobalLoading(null)}>
                 <LoaderIcon className="w-12 h-12 text-spotify-primary animate-spin mb-4" />
                 <div className="text-white font-bold text-lg animate-pulse">{globalLoading}</div>
-                <div className="mt-8 text-gray-400 text-sm font-normal bg-black/50 px-4 py-2 rounded-full cursor-pointer">
-                    (לחץ בכל מקום כדי להעלים מסך זה ולפתוח לוגים)
+                
+                {/* התוספת החדשה: מציג את שלבי העדכון בלייב */}
+                {updateStatusMsg && (
+                    <div className="mt-6 p-4 bg-black/60 rounded-xl text-yellow-400 font-mono text-sm text-center max-w-xs break-words border border-yellow-400/30">
+                        {updateStatusMsg}
+                    </div>
+                )}
+                
+                <div className="mt-8 text-gray-400 text-xs font-normal px-4 py-2 cursor-pointer">
+                    (לחץ בכל מקום כדי להעלים מסך זה)
                 </div>
             </div>
         );
