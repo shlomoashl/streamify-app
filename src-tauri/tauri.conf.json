@@ -25,7 +25,8 @@
     "bundle": {
       "active": true,
       "targets": [
-        "nsis"
+        "nsis",
+        "updater"        
       ],
       "identifier": "com.streamify.app",
       "icon": [
