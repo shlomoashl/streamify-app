@@ -23,11 +23,6 @@ import { audioService } from './AudioService';
 import { logger } from './Logger';
 import LogViewer from './components/LogViewer';
 import { storageService } from './StorageService';
-if (Capacitor.isNativePlatform()) {
-    CapacitorUpdater.notifyAppReady().catch(err => {
-        console.error("notifyAppReady failed", err);
-    });
-}
 const StreamifyMedia = registerPlugin<StreamifyMediaPlugin>('StreamifyMedia');
 // --- קבועים והגדרות מערכת ---
 const STREAMIFY_KEYWORDS = [
