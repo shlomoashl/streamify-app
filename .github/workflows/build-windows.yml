@@ -14,8 +14,6 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -28,17 +26,22 @@ jobs:
     - name: Install dependencies
       run: npm install
 
-    # [מעודכן] הסקריפט עכשיו שומר את הגרסה כמשתנה סביבה כדי ליצור את התגית
-    - name: Prepare Version Bump Script
+    # הסקריפט החדש: משתמש במספר הריצה של גיטהאב בלי לשמור חזרה לגיט!
+    - name: Prepare Dynamic Version Script
       shell: bash
+      env:
+        RUN_NUMBER: ${{ github.run_number }}
       run: |
         cat << 'EOF' > bump-version.cjs
         const fs = require('fs');
+        const runNumber = process.env.RUN_NUMBER;
         
         const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-        let [major, minor, patch] = pkg.version.split('.').map(Number);
-        patch += 1;
-        const newVersion = major + '.' + minor + '.' + patch;
+        let [major, minor] = pkg.version.split('.').map(Number);
+        
+        // מחבר את הגרסה שלך (1.1) עם מספר הריצה בגיטהאב
+        const newVersion = major + '.' + minor + '.' + runNumber;
+        
         pkg.version = newVersion;
         fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
         
@@ -49,25 +52,17 @@ jobs:
           fs.writeFileSync(tauriPath, JSON.stringify(tauri, null, 2));
         }
         
-        // יצירת משתנה סביבה לגיטהאב שבו תאוחסן התגית החדשה
         const envFile = process.env.GITHUB_ENV;
         if (envFile) {
           fs.appendFileSync(envFile, `NEW_VERSION=v${newVersion}\n`);
         }
-        console.log('Version bumped to ' + newVersion);
+        console.log('Dynamic version generated for this build: ' + newVersion);
         EOF
 
-    - name: Execute Version Bump
+    - name: Execute Dynamic Version
       run: node bump-version.cjs
 
-    - name: Commit and Push Version Bump
-      shell: bash
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add package.json src-tauri/tauri.conf.json
-        git diff --quiet && git diff --staged --quiet || git commit -m "chore: bump windows version [skip ci]"
-        git push
+    # ---- שמנו לב? אין כאן יותר שלב של Commit & Push! המחשב שלך נשאר נקי ----
 
     - name: Build Tauri Windows App
       run: npm run build:windows
@@ -77,7 +72,6 @@ jobs:
         TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
         TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
-    # [מעודכן] הקישור לקובץ ה-ZIP יצביע עכשיו על התגית האמיתית הספציפית
     - name: Generate latest.json for Updater
       shell: bash
       run: |
@@ -124,7 +118,6 @@ jobs:
         name: streamify-windows
         path: src-tauri/target/release/bundle/
 
-    # [מעודכן] כאן אנחנו יוצרים את ה-Release בעזרת המשתנה עם השם האמיתי!
     - name: Create GitHub Release and Upload Windows App
       uses: softprops/action-gh-release@v1
       with:
