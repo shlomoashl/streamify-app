@@ -14,6 +14,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -26,12 +28,45 @@ jobs:
     - name: Install dependencies
       run: npm install
 
+    - name: Bump Version (package.json & tauri.conf.json)
+      run: |
+        node -e "
+          const fs = require('fs');
+          
+          // 1. קידום גרסה ב-package.json
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          let [major, minor, patch] = pkg.version.split('.').map(Number);
+          patch += 1;
+          const newVersion = \`\${major}.\${minor}.\${patch}\`;
+          pkg.version = newVersion;
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          
+          // 2. קידום גרסה ב-tauri.conf.json
+          const tauriPath = 'tauri.conf.json';
+          if (fs.existsSync(tauriPath)) {
+            const tauri = JSON.parse(fs.readFileSync(tauriPath, 'utf8'));
+            tauri.package.version = newVersion;
+            fs.writeFileSync(tauriPath, JSON.stringify(tauri, null, 2));
+          }
+          
+          console.log('Version bumped to ' + newVersion);
+        "
+
+    - name: Commit version bump
+      shell: bash
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add package.json tauri.conf.json
+        # בודק אם יש שינויים לפני שעושה קומיט כדי למנוע שגיאות
+        git diff --quiet && git diff --staged --quiet || git commit -m "chore: bump windows version [skip ci]"
+        git push
+
     - name: Build Tauri Windows App
       run: npm run build:windows
       env:
         VITE_SERVER_URL: ${{ secrets.VITE_SERVER_URL }}
         VITE_APP_ENTRY_CODE: ${{ secrets.VITE_APP_ENTRY_CODE }}
-        # שולחים ל-Tauri את מפתחות החתימה שיצרנו
         TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
         TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
