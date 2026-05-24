@@ -2,27 +2,28 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
+import App from './App';
 import './index.css';
 
 const rootElement = document.getElementById('root');
+
 if (!rootElement) {
-  throw new Error("Could not find root element to mount to");
+  throw new Error("Could not find root element");
 }
 
-// קריטי: לפני טעינת App
+const root = ReactDOM.createRoot(rootElement);
+
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+// מיד אחרי render
 if (Capacitor.isNativePlatform()) {
-  CapacitorUpdater.notifyAppReady()
-    .then(() => console.log("notifyAppReady OK - bootstrap"))
-    .catch(err => console.error("notifyAppReady failed - bootstrap", err));
+  setTimeout(() => {
+    CapacitorUpdater.notifyAppReady()
+      .then(() => console.log("notifyAppReady immediate"))
+      .catch(console.error);
+  }, 100);
 }
-
-// טוענים את App רק אחרי notify
-import('./App').then(({ default: App }) => {
-  const root = ReactDOM.createRoot(rootElement);
-
-  root.render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
-});
