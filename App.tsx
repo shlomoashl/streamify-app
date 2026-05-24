@@ -481,25 +481,23 @@ const App: React.FC = () => {
         };
     }, []);
 
-    // בודק בשקט מול הגיטהאב אם יש עדכון חדש זמין
+// בודק בשקט מול הגיטהאב אם יש עדכון חדש זמין
     useEffect(() => {
         const checkUpdateAvailability = async () => {
-            if (!Capacitor.isNativePlatform()) return; // רלוונטי רק לאנדרואיד
+            if (!Capacitor.isNativePlatform()) return; 
             try {
-                const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build?t=${new Date().getTime()}`);
+                // התיקון: מבקש את המידע עם חותמת הזמן של השנייה הנוכחית
+                const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build?t=${Date.now()}`);
                 if (!res.ok) return;
                 
                 const data = await res.json();
                 const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
                 
                 if (updateAsset) {
-                    // לוקח את תאריך העלאת הקובץ לגיטהאב והופך אותו למספר
                     const serverDate = new Date(updateAsset.updated_at).getTime();
-                    // בודק מתי הלקוח עדכן בפעם האחרונה
                     const localDateStr = localStorage.getItem('streamify_app_version_date');
                     const localDate = localDateStr ? parseInt(localDateStr, 10) : 0;
                     
-                    // אם הקובץ בענן חדש יותר ממה שיש ללקוח - מדליק את החיווי!
                     if (serverDate > localDate) {
                         setUpdateAvailable(true);
                     }
@@ -512,7 +510,7 @@ const App: React.FC = () => {
         if (isAppReady) {
             checkUpdateAvailability();
         }
-    }, [isAppReady]);    
+    }, [isAppReady]);   
     // --- LOAD INITIAL DATA (ASYNC) ---
     useEffect(() => {
         const initApp = async () => {
@@ -1654,13 +1652,14 @@ const App: React.FC = () => {
 
         setGlobalLoading("מוריד עדכון פנימי...");
         try {
-            // מביא את התאריך החדש כדי לשמור אותו בזיכרון של הטלפון
-            const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build?t=${new Date().getTime()}`);
+            // התיקון 1: מידע מעודכן על הגרסה
+            const res = await fetch(`https://api.github.com/repos/shlomoashl/streamify-app/releases/tags/latest-build?t=${Date.now()}`);
             const data = await res.json();
             const updateAsset = data.assets?.find((a: any) => a.name === 'update.zip');
-            const newVersionDate = updateAsset ? new Date(updateAsset.updated_at).getTime() : new Date().getTime();
+            const newVersionDate = updateAsset ? new Date(updateAsset.updated_at).getTime() : Date.now();
 
-            const downloadUrl = `https://github.com/shlomoashl/streamify-app/releases/download/latest-build/update.zip?t=${newVersionDate}`;
+            // התיקון 2 הקריטי: מוסיף חותמת זמן כדי שגיטהאב ישלח את הקובץ של היום ולא של אתמול!
+            const downloadUrl = `https://github.com/shlomoashl/streamify-app/releases/download/latest-build/update.zip?t=${Date.now()}`;
             
             const result = await CapacitorUpdater.download({
                 url: downloadUrl,
@@ -1668,7 +1667,6 @@ const App: React.FC = () => {
             });
             
             setGlobalLoading("מתקין ומרענן...");
-            // שומרים את תאריך העדכון ומכבים את נורית ההתראה
             localStorage.setItem('streamify_app_version_date', newVersionDate.toString());
             setUpdateAvailable(false); 
             
