@@ -72,7 +72,10 @@ jobs:
         VITE_APP_ENTRY_CODE: ${{ secrets.VITE_APP_ENTRY_CODE }}
         TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
         TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-
+    - name: Show all generated files
+      shell: pwsh
+      run: |
+        Get-ChildItem src-tauri/target/release -Recurse
     - name: Show bundle files
       shell: pwsh
       run: |
