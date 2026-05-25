@@ -30,18 +30,18 @@ const StreamifyMedia = registerPlugin<StreamifyMediaPlugin>('StreamifyMedia');
 // --- קבועים והגדרות מערכת ---
 const STREAMIFY_KEYWORDS = [
     'אברהם פריד', 
-    'יעקב שוואקי', 
-    'מרדכי בן דוד', 
-    'נפתלי קמפה', 
+    'חסידי עדכני', 
+    'חסידי הטובים', 
+    'חסידי חדש', 
     'brian tyler', 
     'ישי ריבו', 
     'שמוליק סוכות',
-    'קובי ברומר',
+    'דתי מומלצים',
     'חיים ישראל',
-    'בנצי שטיין',
+    'חסידי להיטים',
     'יידל ורדיגר',
     'משה פלד',
-    'פיני איינהורן',
+    'דתי עדכני',
     'ארי היל',
     'עקיבא',
     'הראל טל',
@@ -54,14 +54,15 @@ const STREAMIFY_KEYWORDS = [
 const getLowResThumbnail = (url: string) => {
     if (!url) return url;
     
-    // טיפול בתמונות של YouTube Music (משנה את הגודל ל-120x120 במקום גדול יותר)
-    if (url.includes('=w') && url.includes('-h')) {
-        return url.replace(/=w\d+-h\d+/, '=w120-h120');
+    // 1. טיפול ב-YouTube Music ובפרוקסי של גוגל (מכריח רזולוציה של 120x120)
+    // מכסה גם מקרים של =w1000 וגם -w1000
+    if (url.includes('=w') || url.includes('-w')) {
+        return url.replace(/([=-])w\d+/, '$1w120').replace(/([=-])h\d+/, '$1h120');
     }
     
-    // טיפול בתמונות רגילות של יוטיוב (מוריד מאיכות מקסימלית לאיכות בינונית/נמוכה)
-    if (url.includes('maxresdefault.jpg') || url.includes('hqdefault.jpg')) {
-        return url.replace('maxresdefault.jpg', 'mqdefault.jpg').replace('hqdefault.jpg', 'mqdefault.jpg');
+    // 2. טיפול ביוטיוב רגיל - מוריד בכוח מרזולוציות גבוהות ל-mqdefault (בינוני/נמוך)
+    if (url.match(/(maxresdefault|sddefault|hqdefault)\.jpg/)) {
+        return url.replace(/(maxresdefault|sddefault|hqdefault)\.jpg/, 'mqdefault.jpg');
     }
     
     return url;
@@ -326,24 +327,34 @@ const App: React.FC = () => {
     const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
     const [playlistDisplayLimit, setPlaylistDisplayLimit] = useState(30);
     const observerTarget = useRef<HTMLDivElement>(null);
+    const [streamifyDisplayLimit, setStreamifyDisplayLimit] = useState(20);
+    const streamifyObserverTarget = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         const observer = new IntersectionObserver(
             (entries) => {
-                // ברגע שהלקוח גלל למטה ורואה את האלמנט השקוף - נטען עוד 30 שירים
-                if (entries[0].isIntersecting && selectedPlaylist && playlistDisplayLimit < selectedPlaylist.songs.length) {
-                    setPlaylistDisplayLimit(prev => prev + 30);
-                }
+                entries.forEach(entry => {
+                    // אם האלמנט נכנס למסך
+                    if (entry.isIntersecting) {
+                        // טריגר של רשימת פלייליסט רגילה
+                        if (entry.target === observerTarget.current && selectedPlaylist && playlistDisplayLimit < selectedPlaylist.songs.length) {
+                            setPlaylistDisplayLimit(prev => prev + 30);
+                        }
+                        // טריגר של מסך ה-Streamify
+                        if (entry.target === streamifyObserverTarget.current && streamifyDisplayLimit < streamifyResults.length) {
+                            setStreamifyDisplayLimit(prev => prev + 20);
+                        }
+                    }
+                });
             },
             { threshold: 0.1 }
         );
 
-        if (observerTarget.current) {
-            observer.observe(observerTarget.current);
-        }
+        if (observerTarget.current) observer.observe(observerTarget.current);
+        if (streamifyObserverTarget.current) observer.observe(streamifyObserverTarget.current);
 
         return () => observer.disconnect();
-    }, [selectedPlaylist, playlistDisplayLimit]); // הוספנו מגבלת תצוגה
+    }, [selectedPlaylist, playlistDisplayLimit, streamifyDisplayLimit, streamifyResults.length]);
     
     const [playlistViewMode, setPlaylistViewMode] = useState<'grid' | 'list'>('grid');
 
@@ -744,6 +755,7 @@ const App: React.FC = () => {
     const loadStreamifyRecommendations = async (forceRefresh = false) => {
         // אם לא ביקשנו רענון חובה ויש כבר נתונים (מהזיכרון) - אל תחפש שוב
         if (!forceRefresh && streamifyResults.length > 0) return;
+        setStreamifyDisplayLimit(20);
         
         setIsLoadingStreamify(true);
         
@@ -2290,21 +2302,26 @@ const App: React.FC = () => {
 
     const renderLoader = () => {
         if (!globalLoading) return null;
-        return (
-            <div className="fixed inset-0 bg-black/80 z-[150] flex flex-col items-center justify-center p-4 animate-fade-in" onClick={() => setGlobalLoading(null)}>
-                <LoaderIcon className="w-12 h-12 text-spotify-primary animate-spin mb-4" />
-                <div className="text-white font-bold text-lg animate-pulse">{globalLoading}</div>
-                
-                {/* התוספת החדשה: מציג את שלבי העדכון בלייב */}
-                {updateStatusMsg && (
+
+        // אם יש הודעת סטטוס עדכון - סימן שאנחנו באמצע עדכון תוכנה קריטי, אז נשאיר מסך מלא כדי למנוע לחיצות
+        if (updateStatusMsg) {
+            return (
+                <div className="fixed inset-0 bg-black/95 z-[150] flex flex-col items-center justify-center p-4 animate-fade-in">
+                    <LoaderIcon className="w-12 h-12 text-spotify-primary animate-spin mb-4" />
+                    <div className="text-white font-bold text-lg animate-pulse">{globalLoading}</div>
+                    
                     <div className="mt-6 p-4 bg-black/60 rounded-xl text-yellow-400 font-mono text-sm text-center max-w-xs break-words border border-yellow-400/30">
                         {updateStatusMsg}
                     </div>
-                )}
-                
-                <div className="mt-8 text-gray-400 text-xs font-normal px-4 py-2 cursor-pointer">
-                    (לחץ בכל מקום כדי להעלים מסך זה)
                 </div>
+            );
+        }
+
+        // לכל שאר הפעולות (טעינת שיר, יצירת פלייליסט וכו') - נציג חלונית אלגנטית, קטנה ומרחפת למטה שלא מפריעה ללחיצות
+        return (
+            <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[150] flex items-center gap-3 px-5 py-2.5 bg-[#282828] border border-white/10 rounded-full shadow-[0_10px_40px_rgba(0,0,0,0.8)] animate-fade-in pointer-events-none">
+                <LoaderIcon className="w-4 h-4 text-spotify-primary animate-spin" />
+                <span className="text-white text-sm font-medium truncate max-w-[200px]" dir="rtl">{globalLoading}</span>
             </div>
         );
     };
@@ -3040,7 +3057,7 @@ const App: React.FC = () => {
                     {activeTab === 'streamify' && (
                         <div className="flex-1 p-4 overflow-y-auto no-scrollbar pt-[max(2.5rem,env(safe-area-inset-top))] md:pt-4">
                             <div className="flex justify-between items-center mb-6 px-1">
-                                <h1 className="text-2xl font-bold">מומלצים מאוד עבורך</h1>
+                                <h1 className="text-2xl font-bold">מומלצים עבורך</h1>
                                 <button 
                                     onClick={() => loadStreamifyRecommendations(true)} 
                                     className="p-2 bg-white/10 hover:bg-white/20 rounded-full flex items-center transition text-gray-400 hover:text-white"
@@ -3056,7 +3073,8 @@ const App: React.FC = () => {
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6 px-1">
-                                    {streamifyResults.map((res, idx) => {
+                                    {/* חותך את הרשימה לפי המגבלה הנוכחית */}
+                                    {streamifyResults.slice(0, streamifyDisplayLimit).map((res, idx) => {
                                         const isPlaying = playingPlaylistId === `temp-${res.id}` && playerState.isPlaying;
                                         return (
                                             <div key={`${res.id}-${idx}`} onClick={() => handleResultClick(res)} 
@@ -3086,7 +3104,14 @@ const App: React.FC = () => {
                                                 <div className="text-[12px] text-gray-400 truncate w-full px-1 mt-1 font-medium">{res.author || 'פלייליסט'}</div>
                                             </div>
                                         );
-                                    })}
+                                    })}                                   
+                                    {/* אלמנט הגשש - שקוף לחלוטין, רק מפעיל את הטעינה כשמגיעים אליו */}
+                                    {streamifyResults.length > streamifyDisplayLimit && (
+                                        <div 
+                                            ref={streamifyObserverTarget} 
+                                            className="col-span-full h-4 w-full opacity-0 pointer-events-none" 
+                                        />
+                                    )}
                                 </div>
                             )}
                         </div>
