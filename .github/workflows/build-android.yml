@@ -12,8 +12,11 @@ jobs:
       contents: write
 
     steps:
+    # הוספת fetch-depth: 0 כדי שיוכל לספור את הקומיטים בהיסטוריה
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -41,6 +44,7 @@ jobs:
       run: |
         cd dist
         zip -r ../update.zip *
+        
     # 6. מעביר את קבצי האתר לתוך תיקיית האנדרואיד
     - name: Sync Capacitor
       run: npx cap sync android
@@ -70,12 +74,19 @@ jobs:
         name: streamify-app-release.apk
         path: android/app/build/outputs/apk/release/app-release.apk
 
-    # 10. יוצר Release חדש עם מספר גרסה רץ אוטומטי
+    # יצירת הגרסה המשותפת המבוססת על package.json וספירת הקומיטים
+    - name: Generate Shared Version Tag
+      run: |
+        COMMIT_COUNT=$(git rev-list --count HEAD)
+        BASE_VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
+        echo "NEW_VERSION=v${BASE_VERSION}.${COMMIT_COUNT}" >> $GITHUB_ENV
+
+    # 10. יוצר Release חדש או מעדכן את הקיים באותו תג בדיוק כמו בווינדוס
     - name: Update Release and Overwrite Artifacts
       uses: ncipollo/release-action@v1
       with:
-        tag: "v1.0.${{ github.run_number }}"
-        name: "Streamify v1.0.${{ github.run_number }}"
+        tag: "${{ env.NEW_VERSION }}"
+        name: "Streamify ${{ env.NEW_VERSION }}"
         makeLatest: true
         allowUpdates: true
         replacesArtifacts: true

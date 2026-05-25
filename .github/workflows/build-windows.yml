@@ -12,9 +12,11 @@ jobs:
       contents: write
 
     steps:
-    # 1. מוריד את הקוד לשרת הווינדוס
+    # 1. מוריד את הקוד לשרת הווינדוס (עם כל היסטוריית הקומיטים)
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     # 2. מתקין Node.js
     - name: Setup Node.js
@@ -30,20 +32,20 @@ jobs:
     - name: Install dependencies
       run: npm install
 
-    # 5. יצירת והרצת הגרסה הדינמית (משתמש במספר הריצה של גיטהאב בלי לשמור חזרה לגיט!)
+    # 5. יצירת והרצת הגרסה הדינמית (סופר קומיטים בגיט במקום ריצות שרת)
     - name: Generate and Execute Dynamic Version
       shell: bash
-      env:
-        RUN_NUMBER: ${{ github.run_number }}
       run: |
-        cat << 'EOF' > bump-version.cjs
+        COMMIT_COUNT=$(git rev-list --count HEAD)
+        
+        cat << EOF > bump-version.cjs
         const fs = require('fs');
-        const runNumber = process.env.RUN_NUMBER;
+        const runNumber = "$COMMIT_COUNT";
         
         const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
         let [major, minor] = pkg.version.split('.').map(Number);
         
-        // מחבר את גרסת הבסיס (למשל 1.1) עם מספר הריצה הנוכחי בגיטהאב
+        // מחבר את גרסת הבסיס (למשל 1.1) עם מספר הקומיטים בפרויקט
         const newVersion = major + '.' + minor + '.' + runNumber;
         
         pkg.version = newVersion;
@@ -58,7 +60,7 @@ jobs:
         
         const envFile = process.env.GITHUB_ENV;
         if (envFile) {
-          fs.appendFileSync(envFile, `NEW_VERSION=v${newVersion}\n`);
+          fs.appendFileSync(envFile, \`NEW_VERSION=v\${newVersion}\n\`);
         }
         console.log('Dynamic version generated for this build: ' + newVersion);
         EOF
@@ -72,10 +74,12 @@ jobs:
         VITE_APP_ENTRY_CODE: ${{ secrets.VITE_APP_ENTRY_CODE }}
         TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
         TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        
     - name: Show all generated files
       shell: pwsh
       run: |
         Get-ChildItem src-tauri/target/release -Recurse
+        
     - name: Show bundle files
       shell: pwsh
       run: |
@@ -89,6 +93,7 @@ jobs:
           $_.Name -like "*.zip" -or
           $_.Name -like "*updater*"
         }
+        
     - name: Verify signing secrets
       shell: pwsh
       env:
@@ -97,6 +102,7 @@ jobs:
       run: |
         Write-Host "PRIVATE KEY LENGTH: $($env:TAURI_PRIVATE_KEY.Length)"
         Write-Host "PASSWORD LENGTH: $($env:TAURI_KEY_PASSWORD.Length)"
+        
     # 7. מייצר את קובץ ה-latest.json שמכיל את נתוני העדכון והחתימה הדיגיטלית
     - name: Generate latest.json for Updater
       shell: bash
