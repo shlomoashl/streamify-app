@@ -753,52 +753,64 @@ const App: React.FC = () => {
 
     // --- Helper Functions to Update Local & Cache ---
     const loadStreamifyRecommendations = async (forceRefresh = false) => {
-        // אם לא ביקשנו רענון חובה ויש כבר נתונים (מהזיכרון) - אל תחפש שוב
         if (!forceRefresh && streamifyResults.length > 0) return;
-        setStreamifyDisplayLimit(20);
         
         setIsLoadingStreamify(true);
+        setStreamifyDisplayLimit(20);
         
         try {
-            // שימוש ברשימה הגלובלית שמוגדרת למעלה בראש הקובץ
             const fetchPromises = STREAMIFY_KEYWORDS.map(async (kw) => {
-                const params = new URLSearchParams({ action: 'search_and_download_video', query: kw + ' mix', search_engine: 'youtubemusic_playlists' });
+                // לוקח את המילה בדיוק כמו שהיא כתובה ברשימה שלך
+                const finalQuery = kw;
+                
+                const params = new URLSearchParams({ 
+                    action: 'search_and_download_video', 
+                    query: finalQuery, 
+                    search_engine: 'youtubemusic_playlists' 
+                });
+                
                 const res = await fetch(`${YOUTUBE_API_BASE}?${params.toString()}`);
                 const data = await res.json();
                 
                 if (data.success && data.results) {
-                    return data.results.slice(0, 5); // לוקח רק את ה-5 הראשונים מכל מילה
+                    // לוקח את ה-15 המובילים
+                    let topResults = data.results.slice(0, 15);
+                    
+                    // מסנן תוצאות שבורות
+                    topResults = topResults.filter((r: any) => r.id && r.title);
+                    
+                    // מערבב אותם כדי לגוון בכל כניסה לטאב
+                    for (let i = topResults.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [topResults[i], topResults[j]] = [topResults[j], topResults[i]];
+                    }
+                    
+                    // מחזיר את ה-5 הטובים ביותר אחרי הערבוב
+                    return topResults.slice(0, 5);
                 }
                 return [];
             });
 
-            // ממתין שכל התשובות יחזרו במקביל
             const resultsArrays = await Promise.all(fetchPromises);
             
-            // הופך את כל הרשימות הקטנות לרשימה אחת ארוכה משוטחת
+            // משטח ומסנן כפילויות (שני חיפושים שהביאו את אותו פלייליסט)
             let allResults = resultsArrays.flat();
+            const uniqueResults = Array.from(new Map(allResults.map(item => [item.id, item])).values());
             
-            // מערבב את הרשימה (Shuffle)
-            for (let i = allResults.length - 1; i > 0; i--) {
+            // ערבוב סופי של כל התוצאות מכל המילים
+            for (let i = uniqueResults.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
-                [allResults[i], allResults[j]] = [allResults[j], allResults[i]];
+                [uniqueResults[i], uniqueResults[j]] = [uniqueResults[j], uniqueResults[i]];
             }
             
-            setStreamifyResults(allResults);
-            storageService.saveData('streamify_recommended', allResults); // שומר לזיכרון
+            setStreamifyResults(uniqueResults as YouTubeSearchResult[]);
+            storageService.saveData('streamify_recommended', uniqueResults);
         } catch (e) {
             console.error("Failed to load streamify recommendations", e);
         } finally {
             setIsLoadingStreamify(false);
         }
     };
-
-    // יפעיל את הטעינה כשלוחצים על הטאב אם הוא ריק
-    useEffect(() => {
-        if (activeTab === 'streamify') {
-            loadStreamifyRecommendations();
-        }
-    }, [activeTab]);
 
     const updatePlaylistsLocally = (newPlaylists: Playlist[]) => {
         setPlaylists(newPlaylists);
