@@ -382,7 +382,6 @@ public class StreamifyMediaPlugin extends Plugin {
         call.resolve();
     }
 
-    // --- NEW METHOD: Get Last Played from Native Storage ---
     @PluginMethod
     public void getLastPlayedInfo(PluginCall call) {
         Context context = getContext();
@@ -391,14 +390,14 @@ public class StreamifyMediaPlugin extends Plugin {
         String url = prefs.getString("last_url", null);
         String id = prefs.getString("last_id", null);
         
-        if (url != null && id != null) {
+        // עכשיו, כל עוד יש לנו את ה-ID של השיר (ותמיד יש אותו), אנחנו שולחים אותו חזרה ל-JS!
+        if (id != null && !id.isEmpty()) {
             JSObject ret = new JSObject();
             ret.put("id", id);
-            ret.put("url", url);
+            ret.put("url", url != null ? url : ""); 
             ret.put("title", prefs.getString("last_title", ""));
             ret.put("artist", prefs.getString("last_artist", ""));
             ret.put("artwork", prefs.getString("last_artwork", ""));
-            // Return the saved context (playlist ID) so the app can restore the queue
             ret.put("contextId", prefs.getString("last_context_id", null)); 
             call.resolve(ret);
         } else {
