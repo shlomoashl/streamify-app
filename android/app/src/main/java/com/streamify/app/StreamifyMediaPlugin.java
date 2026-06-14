@@ -81,6 +81,7 @@ public class StreamifyMediaPlugin extends Plugin {
     private static final int MAX_RETRIES = 3;
     private static final long ERROR_RESET_TIME_MS = 60000; // 1 minute
 
+    private int tickCount = 0; // המונה שלנו
     private final Runnable progressRunnable = new Runnable() {
         @Override
         public void run() {
@@ -100,6 +101,14 @@ public class StreamifyMediaPlugin extends Plugin {
                             }
                             
                             notifyListeners("onMediaEvent", ret);
+
+                            // שמירת התקדמות הזמן בזיכרון באופן רציף גם כשהאפליקציה ממוזערת
+                            tickCount++;
+                            if (tickCount >= 5) { // כל 5 שניות
+                                tickCount = 0;
+                                SharedPreferences prefs = getContext().getSharedPreferences("StreamifyPlaybackState", Context.MODE_PRIVATE);
+                                prefs.edit().putLong("last_position", current).commit();
+                            }
                         }
                     } catch (Exception e) {
                         Log.e(TAG, "Error in progress loop", e);
@@ -390,7 +399,6 @@ public class StreamifyMediaPlugin extends Plugin {
         String url = prefs.getString("last_url", null);
         String id = prefs.getString("last_id", null);
         
-        // עכשיו, כל עוד יש לנו את ה-ID של השיר (ותמיד יש אותו), אנחנו שולחים אותו חזרה ל-JS!
         if (id != null && !id.isEmpty()) {
             JSObject ret = new JSObject();
             ret.put("id", id);
@@ -399,6 +407,11 @@ public class StreamifyMediaPlugin extends Plugin {
             ret.put("artist", prefs.getString("last_artist", ""));
             ret.put("artwork", prefs.getString("last_artwork", ""));
             ret.put("contextId", prefs.getString("last_context_id", null)); 
+            
+            // שליפת הזמן שנשמר וחלוקה ל-1000 כדי להפוך לשניות
+            long lastPos = prefs.getLong("last_position", 0);
+            ret.put("savedTime", lastPos / 1000.0); 
+
             call.resolve(ret);
         } else {
             call.resolve(); // Return empty if nothing saved

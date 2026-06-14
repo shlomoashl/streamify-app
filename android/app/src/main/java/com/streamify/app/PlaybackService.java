@@ -109,9 +109,10 @@ public class PlaybackService extends MediaSessionService {
             }
         }
         
-        editor.apply();
+        // איפוס זמן התחלה לשיר חדש וכתיבה מיידית וסינכרונית לזיכרון
+        editor.putLong("last_position", 0);
+        editor.commit(); 
     }
-
     private void restoreLastPlayedSong() {
         try {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);

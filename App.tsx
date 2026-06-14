@@ -625,14 +625,18 @@ const App: React.FC = () => {
                     initialSeekTimeRef.current = savedPlayerState.savedTime;
                 }
 
-                // Player State - HYBRID STRATEGY
-                // 1. Try to get real-time state from Native (if available) - this is the "Source of Truth" for what actually played last
+                // 1. Try to get real-time state from Native (if available)
                 let nativeStateLoaded = false;
                 if (Capacitor.isNativePlatform()) {
                     try {
                         const lastNative = await StreamifyMedia.getLastPlayedInfo() as LastPlayedInfo;
                         if (lastNative && lastNative.id) {
                             console.log("Restoring state from Native Service:", lastNative);
+                            
+                            // הוסף את בלוק המשיכה של הזמן מהנייטיב כאן:
+                            if ((lastNative as any).savedTime && (lastNative as any).savedTime > 0) {
+                                initialSeekTimeRef.current = (lastNative as any).savedTime;
+                            }
                             const nativeSong: PlaylistItem = {
                                 id: lastNative.id,
                                 title: lastNative.title || 'Unknown',
@@ -2079,11 +2083,28 @@ const App: React.FC = () => {
         });
 
         // App State Listener (Focus)
-        const appStateListener = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+        const appStateListener = CapacitorApp.addListener('appStateChange', async ({ isActive }) => {
             console.log(`[App] App State Changed. Active: ${isActive}`);
-            // ברגע שהאפליקציה יורדת לרקע או נסגרת, אנחנו מיד שומרים את מיקום השיר!
+            // ברגע שהאפליקציה יורדת לרקע או נסגרת, אנחנו מיד שומרים את מיקום השיר
             if (!isActive && stateLoadedRef.current && latestPlayerStateRef.current.currentSong) {
                 saveStateToStorage(latestPlayerStateRef.current, latestPlaylistIdRef.current, currentTimeRef.current);
+            }
+            
+            // סנכרון ממשק המשתמש מול הנייטיב כשהאפליקציה חוזרת מהרקע למסך
+            if (isActive && Capacitor.isNativePlatform()) {
+                try {
+                    const nativeInfo = await StreamifyMedia.getLastPlayedInfo() as any;
+                    // אם הנייטיב עבר לשיר אחר בזמן שה-UI ישן, נעדכן את המסך
+                    if (nativeInfo && nativeInfo.id && latestPlayerStateRef.current.currentSong?.id !== nativeInfo.id) {
+                        setPlayerState(prev => {
+                            const idx = prev.queue.findIndex(s => s.id === nativeInfo.id);
+                            if (idx !== -1) {
+                                return { ...prev, currentSong: prev.queue[idx], currentIndex: idx };
+                            }
+                            return prev;
+                        });
+                    }
+                } catch(e) {}
             }
         });
         const timeListener = audioService.addListener('timeUpdate', (data: any) => { 
