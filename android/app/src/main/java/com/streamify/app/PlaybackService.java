@@ -28,6 +28,21 @@ public class PlaybackService extends MediaSessionService {
     private MediaSession mediaSession;
     private Player player;
     private static final String PREFS_NAME = "StreamifyPlaybackState";
+    // מנהל משימות שרץ ברקע באופן עצמאי ושומר את הזמן
+    private final android.os.Handler saveHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable saveRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (player != null && player.isPlaying()) {
+                long currentPos = player.getCurrentPosition();
+                getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putLong("last_position", currentPos)
+                    .commit(); 
+            }
+            saveHandler.postDelayed(this, 2000); // שמירה כל 2 שניות
+        }
+    };    
 
     @OptIn(markerClass = UnstableApi.class)
     @Override
@@ -82,10 +97,12 @@ public class PlaybackService extends MediaSessionService {
 
         mediaSession = new MediaSession.Builder(this, player).build();
         restoreLastPlayedSong();
+        saveHandler.post(saveRunnable);
     }
 
     private void saveLastPlayedSong(MediaItem item) {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        String currentSavedId = prefs.getString("last_id", null);
         SharedPreferences.Editor editor = prefs.edit();
         
         if (item.localConfiguration != null) {
@@ -101,7 +118,6 @@ public class PlaybackService extends MediaSessionService {
                 editor.putString("last_artwork", item.mediaMetadata.artworkUri.toString());
             }
             
-            // SAVE CONTEXT ID (Playlist ID)
             if (item.mediaMetadata.extras != null && item.mediaMetadata.extras.containsKey("contextId")) {
                 editor.putString("last_context_id", item.mediaMetadata.extras.getString("contextId"));
             } else {
@@ -109,8 +125,10 @@ public class PlaybackService extends MediaSessionService {
             }
         }
         
-        // איפוס זמן התחלה לשיר חדש וכתיבה מיידית וסינכרונית לזיכרון
-        editor.putLong("last_position", 0);
+        // איפוס זמן התחלה אך ורק אם מדובר בשיר שונה מהשיר שהיה שמור
+        if (currentSavedId == null || !currentSavedId.equals(item.mediaId)) {
+            editor.putLong("last_position", 0);
+        }
         editor.commit(); 
     }
     private void restoreLastPlayedSong() {
@@ -156,8 +174,14 @@ public class PlaybackService extends MediaSessionService {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        // Only stop if playback has actually finished.
-        // If playing, keep the service alive.
+        // שמירת חירום לפני קריסה או סגירה
+        if (player != null) {
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putLong("last_position", player.getCurrentPosition())
+                .commit();
+        }
+
         if (player != null && !player.isPlaying() && player.getPlaybackState() == Player.STATE_ENDED) {
             stopSelf();
         }
@@ -165,6 +189,17 @@ public class PlaybackService extends MediaSessionService {
 
     @Override
     public void onDestroy() {
+        // כיבוי הטיימר
+        saveHandler.removeCallbacks(saveRunnable);
+        
+        // שמירה סופית בהחלט לפני סגירת הנגן
+        if (player != null) {
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putLong("last_position", player.getCurrentPosition())
+                .commit();
+        }
+
         if (mediaSession != null) {
             mediaSession.release();
             mediaSession = null;

@@ -906,15 +906,16 @@ const App: React.FC = () => {
         if (!playerState.currentSong) return;
         console.log(`Auto-play attempt...`);
         try {
-            // אם אנחנו יודעים שהולך להיות דילוג, משתיקים את הנגן מראש ומפעילים טיימר ביטחון
-            if (initialSeekTimeRef.current > 0) {
-                audioService.setVolume(0);
-                unmuteSafetyTimerRef.current = setTimeout(() => audioService.setVolume(1), 3500);
-            }
-
             setPlayerState(prev => ({ ...prev, isPlaying: true }));
-            await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);
             
+            await audioService.playQueue(
+                playerState.queue, 
+                playerState.currentIndex, 
+                playingPlaylistId || undefined,
+                initialSeekTimeRef.current > 0 ? initialSeekTimeRef.current : undefined
+            );
+            
+            initialSeekTimeRef.current = 0;
             audioInitializedRef.current = true;
         } catch (e) {
             console.error(`Auto-play failed:`, e);
@@ -1901,9 +1902,15 @@ const App: React.FC = () => {
             finalIndex = 0;
         }
         setPlayingPlaylistId(playlistId);
-        setPlayerState(prev => ({ ...prev, isOpen: true, isPlaying: true, currentSong: song, queue: finalQueue, currentIndex: finalIndex, isShuffled: prev.isShuffled, originalQueue: (playerState.isShuffled || isPlaylistStartAction) ? finalOriginalQueue : undefined, isExpanded: window.innerWidth < 768 }));    
+        setPlayerState(prev => {
+            const newState = { ...prev, isOpen: true, isPlaying: true, currentSong: song, queue: finalQueue, currentIndex: finalIndex, isShuffled: prev.isShuffled, originalQueue: (playerState.isShuffled || isPlaylistStartAction) ? finalOriginalQueue : undefined, isExpanded: window.innerWidth < 768 };
+            
+            // שמירה אגרסיבית לזיכרון מיד עם הפעלת השיר
+            saveStateToStorage(newState, playlistId, 0);
+            
+            return newState;
+        });    
 
-        // PASS PLAYLIST ID AS CONTEXT
         audioService.playQueue(finalQueue, finalIndex, playlistId || undefined);
     };
 
@@ -2109,23 +2116,6 @@ const App: React.FC = () => {
         });
         const timeListener = audioService.addListener('timeUpdate', (data: any) => { 
             currentTimeRef.current = data.currentTime; 
-            
-            // --- דילוג חכם ושקט (Silent Seek) ---
-            if (initialSeekTimeRef.current > 0 && data.currentTime > 0.1) {
-                const targetTime = initialSeekTimeRef.current;
-                initialSeekTimeRef.current = 0; // איפוס מיידי 
-                
-                console.log(`[App] Media loaded. Seeking silently to ${targetTime}s`);
-                audioService.seek(targetTime);
-
-                // נותנים לדילוג 150 מילישניות להתבצע בשקט, ואז מדליקים את הסאונד
-                setTimeout(() => {
-                    audioService.setVolume(1); // החזרת הקול לפעולה מלאה (במובייל זה המקסימום הפנימי של האפליקציה)
-                    if (unmuteSafetyTimerRef.current) {
-                        clearTimeout(unmuteSafetyTimerRef.current); // מבטלים את טיימר החירום כי הצלחנו
-                    }
-                }, 150);
-            }
         });
         const stateListener = audioService.addListener('stateChange', (data: any) => { setPlayerState(prev => ({ ...prev, isPlaying: data.isPlaying })); });
         const endListener = audioService.addListener('ended', () => { setPlayerState(prev => ({ ...prev, isPlaying: false })); });

@@ -316,7 +316,7 @@ class AudioService {
         }
     }
 
-    public async playQueue(items: PlaylistItem[], startIndex: number, contextId?: string) {
+    public async playQueue(items: PlaylistItem[], startIndex: number, contextId?: string, startPosition?: number) {
         if (!items || items.length === 0) return;
         
         this.webQueue = items;
@@ -335,11 +335,12 @@ class AudioService {
                     duration: typeof item.duration === 'number' ? item.duration : 0
                 }));
                 
-                await StreamifyMedia.playQueue({
+                await (StreamifyMedia as any).playQueue({
                     items: mediaItems,
                     startIndex: startIndex,
-                    contextId: contextId
-                } as PlayQueueOptions);
+                    contextId: contextId,
+                    startPosition: startPosition
+                });
             } catch (e) {
                 console.error("Native playQueue failed", e);
             }
