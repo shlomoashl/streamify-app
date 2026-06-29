@@ -1,4 +1,3 @@
-
 package com.streamify.app;
 
 import android.content.Context;
@@ -29,10 +28,8 @@ public class PlaybackService extends MediaSessionService {
     private Player player;
     private static final String PREFS_NAME = "StreamifyPlaybackState";
 
-    // תהליכון עצמאי שחסין להקפאות של מערכת ההפעלה
-    private android.os.HandlerThread playerThread;
-    private android.os.Handler playerHandler;
-
+    // שימוש במנהל משימות רגיל - שירות המוזיקה של אנדרואיד חסין להקפאות מטבעו!
+    private final android.os.Handler saveHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable saveRunnable = new Runnable() {
         @Override
         public void run() {
@@ -43,9 +40,7 @@ public class PlaybackService extends MediaSessionService {
                     .putLong("last_position", currentPos)
                     .commit(); 
             }
-            if (playerHandler != null) {
-                playerHandler.postDelayed(this, 2000); // שמירה כל 2 שניות
-            }
+            saveHandler.postDelayed(this, 2000); // שמירה כל 2 שניות
         }
     };   
 
@@ -54,11 +49,6 @@ public class PlaybackService extends MediaSessionService {
     public void onCreate() {
         super.onCreate();
         
-        // אתחול תהליכון (Thread) נפרד רק לנגן ולשמירות (חסין להקפאות של Waze)
-        playerThread = new android.os.HandlerThread("ExoPlayerBackgroundThread");
-        playerThread.start();
-        playerHandler = new android.os.Handler(playerThread.getLooper());
-
         String userAgent = "Streamify";
         
         DefaultHttpDataSource.Factory httpDataSourceFactory = new DefaultHttpDataSource.Factory()
@@ -77,11 +67,10 @@ public class PlaybackService extends MediaSessionService {
             .setPrioritizeTimeOverSizeThresholds(true)
             .build();
 
-        // התיקון הקריטי: שיוך הנגן ל-Looper של הרקע
+        // בנייה תקינה בחוט הראשי של השירות
         player = new ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
-            .setLooper(playerThread.getLooper()) // <--- כאן הקסם שמונע הקפאה
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .setHandleAudioBecomingNoisy(true)
             .build();            
@@ -103,11 +92,8 @@ public class PlaybackService extends MediaSessionService {
 
         mediaSession = new MediaSession.Builder(this, player).build();
         
-        // ביצוע השחזור וטיימר השמירה בתוך התהליכון העצמאי כדי למנוע קריסות
-        playerHandler.post(() -> {
-            restoreLastPlayedSong();
-            playerHandler.post(saveRunnable);
-        });
+        restoreLastPlayedSong();
+        saveHandler.post(saveRunnable);
     }
 
     private void saveLastPlayedSong(MediaItem item) {
@@ -141,12 +127,12 @@ public class PlaybackService extends MediaSessionService {
         }
         editor.commit(); 
     }
+
     private void restoreLastPlayedSong() {
         try {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             String url = prefs.getString("last_url", null);
             
-            // Only restore if we have a URL and the player is currently empty
             if (url != null && player != null && player.getMediaItemCount() == 0) {
                 String id = prefs.getString("last_id", "");
                 String title = prefs.getString("last_title", "Streamify");
@@ -170,7 +156,6 @@ public class PlaybackService extends MediaSessionService {
                     .setUri(url)
                     .setMediaId(id)
                     .setMimeType(MimeTypes.AUDIO_MP4)
-                    // .setMimeType(MimeTypes.AUDIO_WEBM)
                     .setMediaMetadata(metadata)
                     .build();
 
@@ -184,38 +169,29 @@ public class PlaybackService extends MediaSessionService {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        if (playerHandler != null) {
-            playerHandler.post(() -> {
-                if (player != null) {
-                    getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                        .edit()
-                        .putLong("last_position", player.getCurrentPosition())
-                        .commit();
-                    
-                    if (!player.isPlaying() && player.getPlaybackState() == Player.STATE_ENDED) {
-                        stopSelf();
-                    }
-                }
-            });
+        if (player != null) {
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putLong("last_position", player.getCurrentPosition())
+                .commit();
+            
+            if (!player.isPlaying() && player.getPlaybackState() == Player.STATE_ENDED) {
+                stopSelf();
+            }
         }
     }
 
     @Override
     public void onDestroy() {
-        if (playerHandler != null) {
-            playerHandler.removeCallbacks(saveRunnable);
-            playerHandler.post(() -> {
-                // נשימה אחרונה לפני סגירה סופית
-                if (player != null) {
-                    getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                        .edit()
-                        .putLong("last_position", player.getCurrentPosition())
-                        .commit();
-                    player.release();
-                    player = null;
-                }
-                playerThread.quitSafely(); // כיבוי התהליכון העצמאי
-            });
+        saveHandler.removeCallbacks(saveRunnable);
+        
+        if (player != null) {
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putLong("last_position", player.getCurrentPosition())
+                .commit();
+            player.release();
+            player = null;
         }
 
         if (mediaSession != null) {
