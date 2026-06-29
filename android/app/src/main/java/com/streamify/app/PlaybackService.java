@@ -28,8 +28,11 @@ public class PlaybackService extends MediaSessionService {
     private MediaSession mediaSession;
     private Player player;
     private static final String PREFS_NAME = "StreamifyPlaybackState";
-    // מנהל משימות שרץ ברקע באופן עצמאי ושומר את הזמן
-    private final android.os.Handler saveHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    // תהליכון עצמאי שחסין להקפאות של מערכת ההפעלה
+    private android.os.HandlerThread playerThread;
+    private android.os.Handler playerHandler;
+
     private final Runnable saveRunnable = new Runnable() {
         @Override
         public void run() {
@@ -40,15 +43,22 @@ public class PlaybackService extends MediaSessionService {
                     .putLong("last_position", currentPos)
                     .commit(); 
             }
-            saveHandler.postDelayed(this, 2000); // שמירה כל 2 שניות
+            if (playerHandler != null) {
+                playerHandler.postDelayed(this, 2000); // שמירה כל 2 שניות
+            }
         }
-    };    
+    };   
 
     @OptIn(markerClass = UnstableApi.class)
     @Override
     public void onCreate() {
         super.onCreate();
         
+        // אתחול תהליכון (Thread) נפרד רק לנגן ולשמירות (חסין להקפאות של Waze)
+        playerThread = new android.os.HandlerThread("ExoPlayerBackgroundThread");
+        playerThread.start();
+        playerHandler = new android.os.Handler(playerThread.getLooper());
+
         String userAgent = "Streamify";
         
         DefaultHttpDataSource.Factory httpDataSourceFactory = new DefaultHttpDataSource.Factory()
@@ -57,25 +67,21 @@ public class PlaybackService extends MediaSessionService {
             .setConnectTimeoutMs(30000)
             .setReadTimeoutMs(30000);
 
-        // --- כאן אנחנו מלבישים את המפענח שלנו על תעבורת הרשת ---
         DataSource.Factory xorDataSourceFactory = () -> new XorDataSource(httpDataSourceFactory.createDataSource());
 
         DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(this)
-            .setDataSourceFactory(xorDataSourceFactory); // הנגן ימשוך נתונים רק דרך המפענח
+            .setDataSourceFactory(xorDataSourceFactory);
 
         androidx.media3.exoplayer.DefaultLoadControl loadControl = new androidx.media3.exoplayer.DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                30000, // מקסימום באפר (הגדלנו ל-30 שניות)
-                60000, // באפר להחזקה
-                250,   // באפר מינימלי לניגון - שונה ל-250ms לזירוז הפעלה ראשונית
-                500    // באפר לניגון אחרי ניתוק - שונה ל-500ms
-            )
+            .setBufferDurationsMs(30000, 60000, 250, 500)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build();
 
+        // התיקון הקריטי: שיוך הנגן ל-Looper של הרקע
         player = new ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
-            .setLoadControl(loadControl) // <--- זה החלק שהיה חסר!
+            .setLoadControl(loadControl)
+            .setLooper(playerThread.getLooper()) // <--- כאן הקסם שמונע הקפאה
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .setHandleAudioBecomingNoisy(true)
             .build();            
@@ -96,8 +102,12 @@ public class PlaybackService extends MediaSessionService {
         player.setAudioAttributes(audioAttributes, true);
 
         mediaSession = new MediaSession.Builder(this, player).build();
-        restoreLastPlayedSong();
-        saveHandler.post(saveRunnable);
+        
+        // ביצוע השחזור וטיימר השמירה בתוך התהליכון העצמאי כדי למנוע קריסות
+        playerHandler.post(() -> {
+            restoreLastPlayedSong();
+            playerHandler.post(saveRunnable);
+        });
     }
 
     private void saveLastPlayedSong(MediaItem item) {
@@ -174,39 +184,43 @@ public class PlaybackService extends MediaSessionService {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        // שמירת חירום לפני קריסה או סגירה
-        if (player != null) {
-            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putLong("last_position", player.getCurrentPosition())
-                .commit();
-        }
-
-        if (player != null && !player.isPlaying() && player.getPlaybackState() == Player.STATE_ENDED) {
-            stopSelf();
+        if (playerHandler != null) {
+            playerHandler.post(() -> {
+                if (player != null) {
+                    getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit()
+                        .putLong("last_position", player.getCurrentPosition())
+                        .commit();
+                    
+                    if (!player.isPlaying() && player.getPlaybackState() == Player.STATE_ENDED) {
+                        stopSelf();
+                    }
+                }
+            });
         }
     }
 
     @Override
     public void onDestroy() {
-        // כיבוי הטיימר
-        saveHandler.removeCallbacks(saveRunnable);
-        
-        // שמירה סופית בהחלט לפני סגירת הנגן
-        if (player != null) {
-            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putLong("last_position", player.getCurrentPosition())
-                .commit();
+        if (playerHandler != null) {
+            playerHandler.removeCallbacks(saveRunnable);
+            playerHandler.post(() -> {
+                // נשימה אחרונה לפני סגירה סופית
+                if (player != null) {
+                    getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit()
+                        .putLong("last_position", player.getCurrentPosition())
+                        .commit();
+                    player.release();
+                    player = null;
+                }
+                playerThread.quitSafely(); // כיבוי התהליכון העצמאי
+            });
         }
 
         if (mediaSession != null) {
             mediaSession.release();
             mediaSession = null;
-        }
-        if (player != null) {
-            player.release();
-            player = null;
         }
         super.onDestroy();
     }
