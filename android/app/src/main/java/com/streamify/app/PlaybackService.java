@@ -28,21 +28,32 @@ public class PlaybackService extends MediaSessionService {
     private Player player;
     private static final String PREFS_NAME = "StreamifyPlaybackState";
 
-    // שימוש במנהל משימות רגיל - שירות המוזיקה של אנדרואיד חסין להקפאות מטבעו!
+    // הלולאה החכמה: שומרת כל 2 שניות, אך ורק אם בוצעה התקדמות בפועל
     private final android.os.Handler saveHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable saveRunnable = new Runnable() {
+        private long lastSavedPosition = -1;
+        private String lastSavedId = "";
+
         @Override
         public void run() {
+            // הוספנו תנאי player.isPlaying() כדי לא לכתוב לדיסק כשהשיר בהשהייה (Pause)
             if (player != null && player.isPlaying()) {
-                long currentPos = player.getCurrentPosition();
-                getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .edit()
-                    .putLong("last_position", currentPos)
-                    .commit(); 
+                MediaItem currentItem = player.getCurrentMediaItem();
+                if (currentItem != null) {
+                    long currentPos = player.getCurrentPosition();
+                    String currentId = currentItem.mediaId != null ? currentItem.mediaId : "";
+
+                    // שמירה מתבצעת רק אם השיר התחלף, או שהזמן התקדם בלפחות שנייה אחת
+                    if (!currentId.equals(lastSavedId) || Math.abs(currentPos - lastSavedPosition) >= 1000) {
+                        saveEverythingImmediately(currentItem, currentPos);
+                        lastSavedId = currentId;
+                        lastSavedPosition = currentPos;
+                    }
+                }
             }
-            saveHandler.postDelayed(this, 2000); // שמירה כל 2 שניות
+            saveHandler.postDelayed(this, 2000);
         }
-    };   
+    };  
 
     @OptIn(markerClass = UnstableApi.class)
     @Override
@@ -67,7 +78,6 @@ public class PlaybackService extends MediaSessionService {
             .setPrioritizeTimeOverSizeThresholds(true)
             .build();
 
-        // בנייה תקינה בחוט הראשי של השירות
         player = new ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
@@ -75,14 +85,7 @@ public class PlaybackService extends MediaSessionService {
             .setHandleAudioBecomingNoisy(true)
             .build();            
 
-        player.addListener(new Player.Listener() {
-            @Override
-            public void onMediaItemTransition(@Nullable MediaItem mediaItem, int reason) {
-                if (mediaItem != null) {
-                    saveLastPlayedSong(mediaItem);
-                }
-            }
-        });
+        // מחקנו את המאזין onMediaItemTransition - הלולאה עושה הכל!
 
         AudioAttributes audioAttributes = new AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -96,16 +99,17 @@ public class PlaybackService extends MediaSessionService {
         saveHandler.post(saveRunnable);
     }
 
-    private void saveLastPlayedSong(MediaItem item) {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String currentSavedId = prefs.getString("last_id", null);
-        SharedPreferences.Editor editor = prefs.edit();
+    // הפונקציה ששומרת הכל בצורה סינכרונית ובטוחה
+    private void saveEverythingImmediately(MediaItem item, long currentPos) {
+        SharedPreferences.Editor editor = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
+        
+        // שמירת המיקום המדויק
+        editor.putLong("last_position", currentPos);
+        editor.putString("last_id", item.mediaId);
         
         if (item.localConfiguration != null) {
             editor.putString("last_url", item.localConfiguration.uri.toString());
         }
-        
-        editor.putString("last_id", item.mediaId);
         
         if (item.mediaMetadata != null) {
             editor.putString("last_title", item.mediaMetadata.title != null ? item.mediaMetadata.title.toString() : "");
@@ -113,19 +117,12 @@ public class PlaybackService extends MediaSessionService {
             if (item.mediaMetadata.artworkUri != null) {
                 editor.putString("last_artwork", item.mediaMetadata.artworkUri.toString());
             }
-            
             if (item.mediaMetadata.extras != null && item.mediaMetadata.extras.containsKey("contextId")) {
                 editor.putString("last_context_id", item.mediaMetadata.extras.getString("contextId"));
-            } else {
-                editor.remove("last_context_id");
             }
         }
         
-        // איפוס זמן התחלה אך ורק אם מדובר בשיר שונה מהשיר שהיה שמור
-        if (currentSavedId == null || !currentSavedId.equals(item.mediaId)) {
-            editor.putLong("last_position", 0);
-        }
-        editor.commit(); 
+        editor.commit(); // כתיבה מיידית לדיסק!
     }
 
     private void restoreLastPlayedSong() {
@@ -169,31 +166,23 @@ public class PlaybackService extends MediaSessionService {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        if (player != null) {
-            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putLong("last_position", player.getCurrentPosition())
-                .commit();
-            
-            if (!player.isPlaying() && player.getPlaybackState() == Player.STATE_ENDED) {
-                stopSelf();
-            }
+        if (player != null && !player.isPlaying() && player.getPlaybackState() == Player.STATE_ENDED) {
+            stopSelf();
         }
     }
 
     @Override
     public void onDestroy() {
         saveHandler.removeCallbacks(saveRunnable);
-        
         if (player != null) {
-            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putLong("last_position", player.getCurrentPosition())
-                .commit();
+            // שמירה סופית
+            MediaItem currentItem = player.getCurrentMediaItem();
+            if (currentItem != null) {
+                saveEverythingImmediately(currentItem, player.getCurrentPosition());
+            }
             player.release();
             player = null;
         }
-
         if (mediaSession != null) {
             mediaSession.release();
             mediaSession = null;

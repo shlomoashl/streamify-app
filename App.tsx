@@ -617,13 +617,9 @@ const App: React.FC = () => {
                 const savedHistory = await storageService.loadData<string[]>('streamify_search_history', []);
                 setSearchHistory(savedHistory || []);
 
-                // Load saved player state early to get shuffle preference
-                const savedPlayerState = await storageService.loadData<any>('streamify_player_state', null);
-                const savedIsShuffled = savedPlayerState?.isShuffled || false;
-                // משיכת השנייה המדויקת שבה הלקוח עצר
-                if (savedPlayerState?.savedTime) {
-                    initialSeekTimeRef.current = savedPlayerState.savedTime;
-                }
+                // טעינת התור הסטטי שנשמר בפעם האחרונה שלחצו על פלייליסט
+                const savedQueueState = await storageService.loadData<any>('streamify_static_queue', null);
+                const savedIsShuffled = savedQueueState?.isShuffled || false;
 
                 // 1. Try to get real-time state from Native (if available)
                 let nativeStateLoaded = false;
@@ -664,10 +660,10 @@ const App: React.FC = () => {
                                     console.log("Restoring queue from Saved Library:", playlist.name);
                                     let baseQueue = playlist.songs;
                                     
-                                    if (savedPlayerState && savedPlayerState.playingPlaylistId === restoredPlaylistId) {
-                                        if (savedIsShuffled && savedPlayerState.originalQueue && savedPlayerState.queue) {
-                                            restoredQueue = savedPlayerState.queue;
-                                            originalQueueForState = savedPlayerState.originalQueue;
+                                    if (savedQueueState && savedQueueState.playlistId === restoredPlaylistId) {
+                                        if (savedIsShuffled && savedQueueState.originalQueue && savedQueueState.queue) {
+                                            restoredQueue = savedQueueState.queue;
+                                            originalQueueForState = savedQueueState.originalQueue;
                                         } else {
                                             restoredQueue = baseQueue;
                                         }
@@ -679,11 +675,11 @@ const App: React.FC = () => {
                                         }
                                     }
                                 } 
-                                // 2. פתרון באג 2: אם זה חיפוש (ID שמתחיל ב-temp), משחזרים מה-JS Cache
-                                else if (savedPlayerState && savedPlayerState.queue && savedPlayerState.queue.length > 0) {
-                                    console.log("Restoring context for Search/Temp playlist from JS Cache");
-                                    restoredQueue = savedPlayerState.queue;
-                                    originalQueueForState = savedPlayerState.originalQueue;
+                                // 2. שחזור פלייליסטים זמניים (חיפושים) מתור הרקע הסטטי
+                                else if (savedQueueState && savedQueueState.queue && savedQueueState.queue.length > 0) {
+                                    console.log("Restoring context for Search/Temp playlist from JS Static Cache");
+                                    restoredQueue = savedQueueState.queue;
+                                    originalQueueForState = savedQueueState.originalQueue;
                                 }
                                 
                                 // 3. פתרון באג 1: מציאת השיר המלא בתוך התור ששוחזר
@@ -724,21 +720,6 @@ const App: React.FC = () => {
                     }
                 }
 
-                // 2. Fallback to JS Cache if native didn't provide info
-                if (!nativeStateLoaded) {
-                    if (savedPlayerState) {
-                        setPlayingPlaylistId(savedPlayerState.playingPlaylistId || null);
-                        setPlayerState({ 
-                            ...savedPlayerState, 
-                            isPlaying: false, 
-                            isOpen: !!savedPlayerState.currentSong 
-                        });
-                        // if (savedPlayerState.currentSong?.duration) {
-                        //     setDuration(savedPlayerState.currentSong.duration);
-                        // }
-                    }
-                }
-                
                 // Mark state as loaded to allow saving updates
                 stateLoadedRef.current = true;
 
@@ -874,32 +855,16 @@ const App: React.FC = () => {
         }
     }, [playlistViewMode]);
 
-    // שמירה אוטומטית של מצב הנגן לזיכרון המקומי בכל פעם שהשיר, התור או השאפל משתנים
-    const saveStateToStorage = (state: PlayerState, currentPlaylistId: string | null, currentTimeVal: number) => {
+    // שמירת התור הסטטי פעם אחת בלבד בעת הפעלת פלייליסט
+    const saveStaticQueueToStorage = (queue: PlaylistItem[], originalQueue: PlaylistItem[] | undefined, isShuffled: boolean, playlistId: string | null) => {
         if (!stateLoadedRef.current) return;
-        
-        // כאן אנחנו כבר לא שמים 0, אלא את הזמן האמיתי שנשלח
-        const stateToSave = { ...state, savedTime: currentTimeVal, playingPlaylistId: currentPlaylistId };
-        delete (stateToSave as any).originalQueue;
-        storageService.saveData('streamify_player_state', stateToSave);
+        storageService.saveData('streamify_static_queue', {
+            queue,
+            originalQueue,
+            isShuffled,
+            playlistId
+        });
     };
-
-    // 1. שמירה בעת החלפת שיר (מאפס את הזמן)
-    useEffect(() => {
-        if (stateLoadedRef.current && playerState.currentSong) {
-            saveStateToStorage(playerState, playingPlaylistId, 0);
-        }
-    }, [playerState.currentSong?.id, playerState.currentIndex, playerState.isShuffled, playingPlaylistId]);
-
-    // 2. שמירה מחזורית כל 10 שניות למניעת איבוד התקדמות
-    useEffect(() => {
-        const interval = setInterval(() => {
-            if (playerState.isPlaying && stateLoadedRef.current && playerState.currentSong) {
-                saveStateToStorage(playerState, playingPlaylistId, currentTimeRef.current);
-            }
-        }, 10000);
-        return () => clearInterval(interval);
-    }, [playerState, playingPlaylistId]);
 
     const triggerAutoPlay = async () => {
         if (audioInitializedRef.current) return;
@@ -1905,11 +1870,11 @@ const App: React.FC = () => {
         setPlayerState(prev => {
             const newState = { ...prev, isOpen: true, isPlaying: true, currentSong: song, queue: finalQueue, currentIndex: finalIndex, isShuffled: prev.isShuffled, originalQueue: (playerState.isShuffled || isPlaylistStartAction) ? finalOriginalQueue : undefined, isExpanded: window.innerWidth < 768 };
             
-            // שמירה אגרסיבית לזיכרון מיד עם הפעלת השיר
-            saveStateToStorage(newState, playlistId, 0);
+            // אנחנו שומרים אך ורק את רשימת השירים שעכשיו שלחנו למנוע (ללא אינדקס ושיר נוכחי)
+            saveStaticQueueToStorage(finalQueue, newState.originalQueue, prev.isShuffled, playlistId);
             
             return newState;
-        });    
+        });  
 
         audioService.playQueue(finalQueue, finalIndex, playlistId || undefined);
     };
@@ -2026,7 +1991,7 @@ const App: React.FC = () => {
                 audioService.updateQueue(newState.queue, newState.currentIndex, playingPlaylistId || undefined);
             }
             
-            saveStateToStorage(newState, playingPlaylistId, 0);
+            saveStaticQueueToStorage(newState.queue, newState.originalQueue, newState.isShuffled, playingPlaylistId);
             return newState;
         });
     };
@@ -2035,7 +2000,6 @@ const App: React.FC = () => {
         if (playerState.isPlaying) { 
             audioService.pause(); 
             setPlayerState(p => ({ ...p, isPlaying: false })); 
-            saveStateToStorage(playerState, playingPlaylistId, currentTimeRef.current);
         } else {
             if (!audioInitializedRef.current && playerState.currentSong) { 
                 // בדיקת השתקה לפני הפעלה
@@ -2092,12 +2056,6 @@ const App: React.FC = () => {
         // App State Listener (Focus)
         const appStateListener = CapacitorApp.addListener('appStateChange', async ({ isActive }) => {
             console.log(`[App] App State Changed. Active: ${isActive}`);
-            // ברגע שהאפליקציה יורדת לרקע או נסגרת, אנחנו מיד שומרים את מיקום השיר
-            if (!isActive && stateLoadedRef.current && latestPlayerStateRef.current.currentSong) {
-                saveStateToStorage(latestPlayerStateRef.current, latestPlaylistIdRef.current, currentTimeRef.current);
-            }
-            
-            // סנכרון ממשק המשתמש מול הנייטיב כשהאפליקציה חוזרת מהרקע למסך
             if (isActive && Capacitor.isNativePlatform()) {
                 try {
                     const nativeInfo = await StreamifyMedia.getLastPlayedInfo() as any;

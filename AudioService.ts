@@ -607,6 +607,18 @@ class AudioService {
         }
     }
 
+    public async getLastPlayedInfo(): Promise<any> {
+        if (this.isNative) {
+            try {
+                const info = await (StreamifyMedia as any).getLastPlayedInfo();
+                return info;
+            } catch (e) {
+                return null;
+            }
+        }
+        return null; 
+    }
+
     public async cleanup() {
         if (this.isNative) {
             this.nativeListeners.forEach(l => l.remove());

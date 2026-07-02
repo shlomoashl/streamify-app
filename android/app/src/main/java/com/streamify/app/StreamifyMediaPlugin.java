@@ -385,28 +385,23 @@ public class StreamifyMediaPlugin extends Plugin {
 
     @PluginMethod
     public void getLastPlayedInfo(PluginCall call) {
-        Context context = getContext();
-        SharedPreferences prefs = context.getSharedPreferences("StreamifyPlaybackState", Context.MODE_PRIVATE);
+        SharedPreferences prefs = getContext().getSharedPreferences("StreamifyPlaybackState", Context.MODE_PRIVATE);
+        String lastId = prefs.getString("last_id", null);
         
-        String url = prefs.getString("last_url", null);
-        String id = prefs.getString("last_id", null);
-        
-        if (id != null && !id.isEmpty()) {
+        if (lastId != null) {
             JSObject ret = new JSObject();
-            ret.put("id", id);
-            ret.put("url", url != null ? url : ""); 
+            ret.put("id", lastId);
+            ret.put("url", prefs.getString("last_url", ""));
             ret.put("title", prefs.getString("last_title", ""));
             ret.put("artist", prefs.getString("last_artist", ""));
             ret.put("artwork", prefs.getString("last_artwork", ""));
-            ret.put("contextId", prefs.getString("last_context_id", null)); 
+            ret.put("contextId", prefs.getString("last_context_id", ""));
+            // הכי חשוב: מיקום מדויק בשניות
+            ret.put("position", prefs.getLong("last_position", 0) / 1000.0);
             
-            // שליפת הזמן שנשמר וחלוקה ל-1000 כדי להפוך לשניות
-            long lastPos = prefs.getLong("last_position", 0);
-            ret.put("savedTime", lastPos / 1000.0); 
-
             call.resolve(ret);
         } else {
-            call.resolve(); // Return empty if nothing saved
+            call.reject("No last played info found");
         }
     }
 
