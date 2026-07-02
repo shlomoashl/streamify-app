@@ -589,6 +589,7 @@ const App: React.FC = () => {
     }, [isAppReady]);
 
     // --- LOAD INITIAL DATA (ASYNC) ---
+    // --- LOAD INITIAL DATA (ASYNC) ---
     useEffect(() => {
         const initApp = async () => {
             try {
@@ -620,24 +621,40 @@ const App: React.FC = () => {
                 // Load saved player state early to get shuffle preference
                 const savedPlayerState = await storageService.loadData<any>('streamify_player_state', null);
                 const savedIsShuffled = savedPlayerState?.isShuffled || false;
-                // משיכת השנייה המדויקת שבה הלקוח עצר
-                if (savedPlayerState?.savedTime) {
-                    initialSeekTimeRef.current = savedPlayerState.savedTime;
+                
+                let stateRestoredFromUI = false;
+
+                // 1. עדיפות עליונה: שחזור המצב מה-UI (מה שאתה רואה בעיניים)
+                if (savedPlayerState && savedPlayerState.currentSong) {
+                    console.log("Restoring state from UI Cache (Priority):", savedPlayerState.currentSong.title);
+                    
+                    // משיכת השנייה המדויקת שבה עצרת
+                    if (savedPlayerState.savedTime && savedPlayerState.savedTime > 0) {
+                        initialSeekTimeRef.current = savedPlayerState.savedTime;
+                    }
+
+                    setPlayingPlaylistId(savedPlayerState.playingPlaylistId || null);
+                    setPlayerState({ 
+                        ...savedPlayerState, 
+                        isPlaying: false, 
+                        isOpen: true,
+                        isShuffled: savedIsShuffled
+                    });
+                    
+                    stateRestoredFromUI = true;
                 }
 
-                // 1. Try to get real-time state from Native (if available)
-                let nativeStateLoaded = false;
-                if (Capacitor.isNativePlatform()) {
+                // 2. פולבק (גיבוי): רק אם ה-UI ריק, ננסה למשוך מהנייטיב
+                if (!stateRestoredFromUI && Capacitor.isNativePlatform()) {
                     try {
                         const lastNative = await StreamifyMedia.getLastPlayedInfo() as LastPlayedInfo;
                         if (lastNative && lastNative.id) {
-                            console.log("Restoring state from Native Service:", lastNative);
+                            console.log("Restoring state from Native Service (Fallback):", lastNative);
                             
-                            // הוסף את בלוק המשיכה של הזמן מהנייטיב כאן:
                             if ((lastNative as any).savedTime && (lastNative as any).savedTime > 0) {
                                 initialSeekTimeRef.current = (lastNative as any).savedTime;
                             }
-                            const nativeSong: PlaylistItem = {
+                            let nativeSong: PlaylistItem = {
                                 id: lastNative.id,
                                 title: lastNative.title || 'Unknown',
                                 author: lastNative.artist || 'Unknown',
@@ -647,8 +664,7 @@ const App: React.FC = () => {
                                 addedAt: new Date().toISOString()
                             };
                             
-                            // CONTEXT RESTORATION LOGIC
-                            // FIXED: Restore the FULL queue from the saved playlist if contextId is present
+                            // שיחזור התור מהפלייליסט במידה וקיים (הקוד המקורי שלך!)
                             let restoredQueue = [nativeSong];
                             let restoredIndex = 0;
                             let restoredPlaylistId: string | null = null;
@@ -657,88 +673,47 @@ const App: React.FC = () => {
                             if (lastNative.contextId) {
                                 restoredPlaylistId = lastNative.contextId;
                                 
-                                // 1. מחפשים קודם בספרייה השמורה (עבור פלייליסטים קבועים)
                                 const playlist = savedPlaylists.find(p => p.id === lastNative.contextId);
                                 
                                 if (playlist && playlist.songs.length > 0) {
-                                    console.log("Restoring queue from Saved Library:", playlist.name);
                                     let baseQueue = playlist.songs;
-                                    
-                                    if (savedPlayerState && savedPlayerState.playingPlaylistId === restoredPlaylistId) {
-                                        if (savedIsShuffled && savedPlayerState.originalQueue && savedPlayerState.queue) {
-                                            restoredQueue = savedPlayerState.queue;
-                                            originalQueueForState = savedPlayerState.originalQueue;
-                                        } else {
-                                            restoredQueue = baseQueue;
-                                        }
-                                    } else {
-                                        restoredQueue = baseQueue;
-                                        if (savedIsShuffled) {
-                                            originalQueueForState = [...baseQueue];
-                                            restoredQueue = shuffleArray([...baseQueue]);
-                                        }
+                                    restoredQueue = baseQueue;
+                                    if (savedIsShuffled) {
+                                        originalQueueForState = [...baseQueue];
+                                        restoredQueue = shuffleArray([...baseQueue]);
                                     }
                                 } 
-                                // 2. פתרון באג 2: אם זה חיפוש (ID שמתחיל ב-temp), משחזרים מה-JS Cache
-                                else if (savedPlayerState && savedPlayerState.queue && savedPlayerState.queue.length > 0) {
-                                    console.log("Restoring context for Search/Temp playlist from JS Cache");
-                                    restoredQueue = savedPlayerState.queue;
-                                    originalQueueForState = savedPlayerState.originalQueue;
-                                }
                                 
-                                // 3. פתרון באג 1: מציאת השיר המלא בתוך התור ששוחזר
                                 const songIndex = restoredQueue.findIndex(s => s.id === lastNative.id);
                                 if (songIndex !== -1) {
                                     restoredIndex = songIndex;
-                                    
-                                    // אנחנו לוקחים את השיר המלא מהתור ולא רק את ה-ID מה-Native
                                     const fullSongData = restoredQueue[songIndex];
                                     nativeSong = {
                                         ...fullSongData,
-                                        id: lastNative.id // מוודאים שה-ID נשמר
+                                        id: lastNative.id
                                     };
-                                    
-                                    console.log(`Successfully restored full metadata for: ${nativeSong.title}`);
                                 } else {
-                                    // פולבק אם השיר לא נמצא בתור
                                     restoredQueue = [nativeSong];
                                 }
                             }
 
-                            
                             setPlayingPlaylistId(restoredPlaylistId);
                             setPlayerState({
                                 isOpen: true,
-                                isPlaying: false, // Start paused
+                                isPlaying: false,
                                 currentSong: nativeSong,
                                 queue: restoredQueue,
                                 currentIndex: restoredIndex,
-                                isShuffled: savedIsShuffled, // <-- משתמשים במשתנה שחילצנו בתחילת הפונקציה!
+                                isShuffled: savedIsShuffled,
                                 isExpanded: false,
                                 originalQueue: originalQueueForState
                             });
-                            nativeStateLoaded = true;
                         }
                     } catch (e) {
                         console.warn("Failed to get native last played info:", e);
                     }
                 }
 
-                // 2. Fallback to JS Cache if native didn't provide info
-                if (!nativeStateLoaded) {
-                    if (savedPlayerState) {
-                        setPlayingPlaylistId(savedPlayerState.playingPlaylistId || null);
-                        setPlayerState({ 
-                            ...savedPlayerState, 
-                            isPlaying: false, 
-                            isOpen: !!savedPlayerState.currentSong 
-                        });
-                        // if (savedPlayerState.currentSong?.duration) {
-                        //     setDuration(savedPlayerState.currentSong.duration);
-                        // }
-                    }
-                }
-                
                 // Mark state as loaded to allow saving updates
                 stateLoadedRef.current = true;
 
