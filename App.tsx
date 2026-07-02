@@ -28,29 +28,23 @@ import LogViewer from './components/LogViewer';
 import { storageService } from './StorageService';
 const StreamifyMedia = registerPlugin<StreamifyMediaPlugin>('StreamifyMedia');
 // --- קבועים והגדרות מערכת ---
+// --- קבועים והגדרות מערכת ---
 const STREAMIFY_KEYWORDS = [
-    'אברהם פריד', 
-    'חסידי עדכני', 
-    'חסידי הטובים', 
-    'חסידי חדש', 
-    'brian tyler', 
-    'ישי ריבו', 
-    'שמוליק סוכות',
-    'דתי מומלצים',
-    'חיים ישראל',
-    'חסידי להיטים',
-    'יידל ורדיגר',
-    'משה פלד',
-    'דתי עדכני',
-    'ארי היל',
-    'עקיבא',
-    'הראל טל',
-    'שירים חסידיים', 
-    'פלייליסט חסידי'
+    'פלייליסט חסידי', 'מוזיקה יהודית ברצף', 'להיטים חסידיים', 'חסידי עדכני',
+    'מחרוזות שמחה', 'קומזיץ ישיבתי', 'שירי נשמה יהודיים', 'דתי פופולרי',
+    'חסידי הטובים', 'מוזיקה לשבת קודש', 'שירי חתונה חרדיים', 'דתי מומלצים',
+    'מוזיקה חרדית', 'פופ חסידי', 'מחרוזות ווקאליות', 'מיקס חסידי',
+    'להיטי המגזר', 'אוסף שירים חסידיים', 'דאנס חסידי', 'שירים שקטים דתיים',
+    'מחרוזת חסידית', 'מזרחי דתי', 'חסידי חדש', 'פלייליסט ישיבתי'
 ];
-// --- Utilities ---
 
-// הוסף את הפונקציה הזו באזור ה-Utilities למעלה
+// מאיצי פופולריות שמכריחים את יוטיוב להחזיר פלייליסטים עם הרבה צפיות
+const POPULARITY_MODIFIERS = [
+    'להיטים', 'הכי מושמעים', 'מיקס', 'פופולרי', '2024', 
+    'הטובים ביותר', 'אוסף', 'Top', 'הנצפים ביותר', 'שירים אהובים'
+];
+
+// --- Utilities ---
 const getLowResThumbnail = (url: string) => {
     if (!url) return url;
     
@@ -736,7 +730,6 @@ const App: React.FC = () => {
         initApp();
     }, []);
 
-    // --- Helper Functions to Update Local & Cache ---
     const loadStreamifyRecommendations = async (forceRefresh = false) => {
         if (!forceRefresh && streamifyResults.length > 0) return;
         
@@ -744,9 +737,15 @@ const App: React.FC = () => {
         setStreamifyDisplayLimit(20);
         
         try {
-            const fetchPromises = STREAMIFY_KEYWORDS.map(async (kw) => {
-                // לוקח את המילה בדיוק כמו שהיא כתובה ברשימה שלך
-                const finalQuery = kw;
+            // 1. נבחר 7 מילות מפתח אקראיות מתוך המאגר כדי שבכל רענון החיפושים יהיו שונים לחלוטין
+            const shuffledKeywords = [...STREAMIFY_KEYWORDS].sort(() => 0.5 - Math.random()).slice(0, 7);
+
+            const fetchPromises = shuffledKeywords.map(async (kw) => {
+                // 2. נוסיף סיומת רנדומלית שמכריחה את יוטיוב להביא פלייליסטים פופולריים ועמוסים בצפיות
+                const randomModifier = POPULARITY_MODIFIERS[Math.floor(Math.random() * POPULARITY_MODIFIERS.length)];
+                
+                // 70% מהזמן נצרף מילת פופולריות כדי לגוון גם בסוגי החיפושים
+                const finalQuery = Math.random() > 0.3 ? `${kw} ${randomModifier}` : kw;
                 
                 const params = new URLSearchParams({ 
                     action: 'search_and_download_video', 
@@ -758,19 +757,19 @@ const App: React.FC = () => {
                 const data = await res.json();
                 
                 if (data.success && data.results) {
-                    // לוקח את ה-15 המובילים
-                    let topResults = data.results.slice(0, 15);
+                    // לוקחים את ה-30 המובילים (במקום 15) כדי להגדיל משמעותית את המגוון (Range)
+                    let topResults = data.results.slice(0, 30);
                     
                     // מסנן תוצאות שבורות
                     topResults = topResults.filter((r: any) => r.id && r.title);
                     
-                    // מערבב אותם כדי לגוון בכל כניסה לטאב
+                    // מערבב אותם היטב
                     for (let i = topResults.length - 1; i > 0; i--) {
                         const j = Math.floor(Math.random() * (i + 1));
                         [topResults[i], topResults[j]] = [topResults[j], topResults[i]];
                     }
                     
-                    // מחזיר את ה-5 הטובים ביותר אחרי הערבוב
+                    // מחזיר 5 אקראיים מתוך מאגר ה-30 המעורבב
                     return topResults.slice(0, 5);
                 }
                 return [];
@@ -778,11 +777,11 @@ const App: React.FC = () => {
 
             const resultsArrays = await Promise.all(fetchPromises);
             
-            // משטח ומסנן כפילויות (שני חיפושים שהביאו את אותו פלייליסט)
+            // משטח ומסנן כפילויות (למקרה ששני חיפושים הביאו את אותו פלייליסט בטעות)
             let allResults = resultsArrays.flat();
             const uniqueResults = Array.from(new Map(allResults.map(item => [item.id, item])).values());
             
-            // ערבוב סופי של כל התוצאות מכל המילים
+            // ערבוב סופי של כל התוצאות מכל החיפושים ליצירת הפיד של Streamify
             for (let i = uniqueResults.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [uniqueResults[i], uniqueResults[j]] = [uniqueResults[j], uniqueResults[i]];
