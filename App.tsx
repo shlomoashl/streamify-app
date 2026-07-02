@@ -28,29 +28,23 @@ import LogViewer from './components/LogViewer';
 import { storageService } from './StorageService';
 const StreamifyMedia = registerPlugin<StreamifyMediaPlugin>('StreamifyMedia');
 // --- קבועים והגדרות מערכת ---
+// --- קבועים והגדרות מערכת ---
 const STREAMIFY_KEYWORDS = [
-    'אברהם פריד', 
-    'חסידי עדכני', 
-    'חסידי הטובים', 
-    'חסידי חדש', 
-    'brian tyler', 
-    'ישי ריבו', 
-    'שמוליק סוכות',
-    'דתי מומלצים',
-    'חיים ישראל',
-    'חסידי להיטים',
-    'יידל ורדיגר',
-    'משה פלד',
-    'דתי עדכני',
-    'ארי היל',
-    'עקיבא',
-    'הראל טל',
-    'שירים חסידיים', 
-    'פלייליסט חסידי'
+    'פלייליסט חסידי', 'מוזיקה יהודית ברצף', 'להיטים חסידיים', 'חסידי עדכני',
+    'מחרוזות שמחה', 'קומזיץ ישיבתי', 'שירי נשמה יהודיים', 'דתי פופולרי',
+    'חסידי הטובים', 'מוזיקה לשבת קודש', 'שירי חתונה חרדיים', 'דתי מומלצים',
+    'מוזיקה חרדית', 'פופ חסידי', 'מחרוזות ווקאליות', 'מיקס חסידי',
+    'להיטי המגזר', 'אוסף שירים חסידיים', 'דאנס חסידי', 'שירים שקטים דתיים',
+    'מחרוזת חסידית', 'מזרחי דתי', 'חסידי חדש', 'פלייליסט ישיבתי'
 ];
-// --- Utilities ---
 
-// הוסף את הפונקציה הזו באזור ה-Utilities למעלה
+// מאיצי פופולריות שמכריחים את יוטיוב להחזיר פלייליסטים עם הרבה צפיות
+const POPULARITY_MODIFIERS = [
+    'להיטים', 'הכי מושמעים', 'מיקס', 'פופולרי', '2024', 
+    'הטובים ביותר', 'אוסף', 'Top', 'הנצפים ביותר', 'שירים אהובים'
+];
+
+// --- Utilities ---
 const getLowResThumbnail = (url: string) => {
     if (!url) return url;
     
@@ -589,7 +583,6 @@ const App: React.FC = () => {
     }, [isAppReady]);
 
     // --- LOAD INITIAL DATA (ASYNC) ---
-    // --- LOAD INITIAL DATA (ASYNC) ---
     useEffect(() => {
         const initApp = async () => {
             try {
@@ -618,43 +611,23 @@ const App: React.FC = () => {
                 const savedHistory = await storageService.loadData<string[]>('streamify_search_history', []);
                 setSearchHistory(savedHistory || []);
 
-                // Load saved player state early to get shuffle preference
-                const savedPlayerState = await storageService.loadData<any>('streamify_player_state', null);
-                const savedIsShuffled = savedPlayerState?.isShuffled || false;
-                
-                let stateRestoredFromUI = false;
+                // טעינת התור הסטטי שנשמר בפעם האחרונה שלחצו על פלייליסט
+                const savedQueueState = await storageService.loadData<any>('streamify_static_queue', null);
+                const savedIsShuffled = savedQueueState?.isShuffled || false;
 
-                // 1. עדיפות עליונה: שחזור המצב מה-UI (מה שאתה רואה בעיניים)
-                if (savedPlayerState && savedPlayerState.currentSong) {
-                    console.log("Restoring state from UI Cache (Priority):", savedPlayerState.currentSong.title);
-                    
-                    // משיכת השנייה המדויקת שבה עצרת
-                    if (savedPlayerState.savedTime && savedPlayerState.savedTime > 0) {
-                        initialSeekTimeRef.current = savedPlayerState.savedTime;
-                    }
-
-                    setPlayingPlaylistId(savedPlayerState.playingPlaylistId || null);
-                    setPlayerState({ 
-                        ...savedPlayerState, 
-                        isPlaying: false, 
-                        isOpen: true,
-                        isShuffled: savedIsShuffled
-                    });
-                    
-                    stateRestoredFromUI = true;
-                }
-
-                // 2. פולבק (גיבוי): רק אם ה-UI ריק, ננסה למשוך מהנייטיב
-                if (!stateRestoredFromUI && Capacitor.isNativePlatform()) {
+                // 1. Try to get real-time state from Native (if available)
+                let nativeStateLoaded = false;
+                if (Capacitor.isNativePlatform()) {
                     try {
                         const lastNative = await StreamifyMedia.getLastPlayedInfo() as LastPlayedInfo;
                         if (lastNative && lastNative.id) {
-                            console.log("Restoring state from Native Service (Fallback):", lastNative);
+                            console.log("Restoring state from Native Service:", lastNative);
                             
+                            // הוסף את בלוק המשיכה של הזמן מהנייטיב כאן:
                             if ((lastNative as any).savedTime && (lastNative as any).savedTime > 0) {
                                 initialSeekTimeRef.current = (lastNative as any).savedTime;
                             }
-                            let nativeSong: PlaylistItem = {
+                            const nativeSong: PlaylistItem = {
                                 id: lastNative.id,
                                 title: lastNative.title || 'Unknown',
                                 author: lastNative.artist || 'Unknown',
@@ -664,7 +637,8 @@ const App: React.FC = () => {
                                 addedAt: new Date().toISOString()
                             };
                             
-                            // שיחזור התור מהפלייליסט במידה וקיים (הקוד המקורי שלך!)
+                            // CONTEXT RESTORATION LOGIC
+                            // FIXED: Restore the FULL queue from the saved playlist if contextId is present
                             let restoredQueue = [nativeSong];
                             let restoredIndex = 0;
                             let restoredPlaylistId: string | null = null;
@@ -673,41 +647,67 @@ const App: React.FC = () => {
                             if (lastNative.contextId) {
                                 restoredPlaylistId = lastNative.contextId;
                                 
+                                // 1. מחפשים קודם בספרייה השמורה (עבור פלייליסטים קבועים)
                                 const playlist = savedPlaylists.find(p => p.id === lastNative.contextId);
                                 
                                 if (playlist && playlist.songs.length > 0) {
+                                    console.log("Restoring queue from Saved Library:", playlist.name);
                                     let baseQueue = playlist.songs;
-                                    restoredQueue = baseQueue;
-                                    if (savedIsShuffled) {
-                                        originalQueueForState = [...baseQueue];
-                                        restoredQueue = shuffleArray([...baseQueue]);
+                                    
+                                    if (savedQueueState && savedQueueState.playlistId === restoredPlaylistId) {
+                                        if (savedIsShuffled && savedQueueState.originalQueue && savedQueueState.queue) {
+                                            restoredQueue = savedQueueState.queue;
+                                            originalQueueForState = savedQueueState.originalQueue;
+                                        } else {
+                                            restoredQueue = baseQueue;
+                                        }
+                                    } else {
+                                        restoredQueue = baseQueue;
+                                        if (savedIsShuffled) {
+                                            originalQueueForState = [...baseQueue];
+                                            restoredQueue = shuffleArray([...baseQueue]);
+                                        }
                                     }
                                 } 
+                                // 2. שחזור פלייליסטים זמניים (חיפושים) מתור הרקע הסטטי
+                                else if (savedQueueState && savedQueueState.queue && savedQueueState.queue.length > 0) {
+                                    console.log("Restoring context for Search/Temp playlist from JS Static Cache");
+                                    restoredQueue = savedQueueState.queue;
+                                    originalQueueForState = savedQueueState.originalQueue;
+                                }
                                 
+                                // 3. פתרון באג 1: מציאת השיר המלא בתוך התור ששוחזר
                                 const songIndex = restoredQueue.findIndex(s => s.id === lastNative.id);
                                 if (songIndex !== -1) {
                                     restoredIndex = songIndex;
+                                    
+                                    // אנחנו לוקחים את השיר המלא מהתור ולא רק את ה-ID מה-Native
                                     const fullSongData = restoredQueue[songIndex];
                                     nativeSong = {
                                         ...fullSongData,
-                                        id: lastNative.id
+                                        id: lastNative.id // מוודאים שה-ID נשמר
                                     };
+                                    
+                                    console.log(`Successfully restored full metadata for: ${nativeSong.title}`);
                                 } else {
+                                    // פולבק אם השיר לא נמצא בתור
                                     restoredQueue = [nativeSong];
                                 }
                             }
 
+                            
                             setPlayingPlaylistId(restoredPlaylistId);
                             setPlayerState({
                                 isOpen: true,
-                                isPlaying: false,
+                                isPlaying: false, // Start paused
                                 currentSong: nativeSong,
                                 queue: restoredQueue,
                                 currentIndex: restoredIndex,
-                                isShuffled: savedIsShuffled,
+                                isShuffled: savedIsShuffled, // <-- משתמשים במשתנה שחילצנו בתחילת הפונקציה!
                                 isExpanded: false,
                                 originalQueue: originalQueueForState
                             });
+                            nativeStateLoaded = true;
                         }
                     } catch (e) {
                         console.warn("Failed to get native last played info:", e);
@@ -730,7 +730,6 @@ const App: React.FC = () => {
         initApp();
     }, []);
 
-    // --- Helper Functions to Update Local & Cache ---
     const loadStreamifyRecommendations = async (forceRefresh = false) => {
         if (!forceRefresh && streamifyResults.length > 0) return;
         
@@ -738,9 +737,15 @@ const App: React.FC = () => {
         setStreamifyDisplayLimit(20);
         
         try {
-            const fetchPromises = STREAMIFY_KEYWORDS.map(async (kw) => {
-                // לוקח את המילה בדיוק כמו שהיא כתובה ברשימה שלך
-                const finalQuery = kw;
+            // 1. נבחר 7 מילות מפתח אקראיות מתוך המאגר כדי שבכל רענון החיפושים יהיו שונים לחלוטין
+            const shuffledKeywords = [...STREAMIFY_KEYWORDS].sort(() => 0.5 - Math.random()).slice(0, 7);
+
+            const fetchPromises = shuffledKeywords.map(async (kw) => {
+                // 2. נוסיף סיומת רנדומלית שמכריחה את יוטיוב להביא פלייליסטים פופולריים ועמוסים בצפיות
+                const randomModifier = POPULARITY_MODIFIERS[Math.floor(Math.random() * POPULARITY_MODIFIERS.length)];
+                
+                // 70% מהזמן נצרף מילת פופולריות כדי לגוון גם בסוגי החיפושים
+                const finalQuery = Math.random() > 0.3 ? `${kw} ${randomModifier}` : kw;
                 
                 const params = new URLSearchParams({ 
                     action: 'search_and_download_video', 
@@ -752,19 +757,19 @@ const App: React.FC = () => {
                 const data = await res.json();
                 
                 if (data.success && data.results) {
-                    // לוקח את ה-15 המובילים
-                    let topResults = data.results.slice(0, 15);
+                    // לוקחים את ה-30 המובילים (במקום 15) כדי להגדיל משמעותית את המגוון (Range)
+                    let topResults = data.results.slice(0, 30);
                     
                     // מסנן תוצאות שבורות
                     topResults = topResults.filter((r: any) => r.id && r.title);
                     
-                    // מערבב אותם כדי לגוון בכל כניסה לטאב
+                    // מערבב אותם היטב
                     for (let i = topResults.length - 1; i > 0; i--) {
                         const j = Math.floor(Math.random() * (i + 1));
                         [topResults[i], topResults[j]] = [topResults[j], topResults[i]];
                     }
                     
-                    // מחזיר את ה-5 הטובים ביותר אחרי הערבוב
+                    // מחזיר 5 אקראיים מתוך מאגר ה-30 המעורבב
                     return topResults.slice(0, 5);
                 }
                 return [];
@@ -772,11 +777,11 @@ const App: React.FC = () => {
 
             const resultsArrays = await Promise.all(fetchPromises);
             
-            // משטח ומסנן כפילויות (שני חיפושים שהביאו את אותו פלייליסט)
+            // משטח ומסנן כפילויות (למקרה ששני חיפושים הביאו את אותו פלייליסט בטעות)
             let allResults = resultsArrays.flat();
             const uniqueResults = Array.from(new Map(allResults.map(item => [item.id, item])).values());
             
-            // ערבוב סופי של כל התוצאות מכל המילים
+            // ערבוב סופי של כל התוצאות מכל החיפושים ליצירת הפיד של Streamify
             for (let i = uniqueResults.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [uniqueResults[i], uniqueResults[j]] = [uniqueResults[j], uniqueResults[i]];
@@ -849,47 +854,32 @@ const App: React.FC = () => {
         }
     }, [playlistViewMode]);
 
-    // שמירה אוטומטית של מצב הנגן לזיכרון המקומי בכל פעם שהשיר, התור או השאפל משתנים
-    const saveStateToStorage = (state: PlayerState, currentPlaylistId: string | null, currentTimeVal: number) => {
+    // שמירת התור הסטטי פעם אחת בלבד בעת הפעלת פלייליסט
+    const saveStaticQueueToStorage = (queue: PlaylistItem[], originalQueue: PlaylistItem[] | undefined, isShuffled: boolean, playlistId: string | null) => {
         if (!stateLoadedRef.current) return;
-        
-        // כאן אנחנו כבר לא שמים 0, אלא את הזמן האמיתי שנשלח
-        const stateToSave = { ...state, savedTime: currentTimeVal, playingPlaylistId: currentPlaylistId };
-        delete (stateToSave as any).originalQueue;
-        storageService.saveData('streamify_player_state', stateToSave);
+        storageService.saveData('streamify_static_queue', {
+            queue,
+            originalQueue,
+            isShuffled,
+            playlistId
+        });
     };
-
-    // 1. שמירה בעת החלפת שיר (מאפס את הזמן)
-    useEffect(() => {
-        if (stateLoadedRef.current && playerState.currentSong) {
-            saveStateToStorage(playerState, playingPlaylistId, 0);
-        }
-    }, [playerState.currentSong?.id, playerState.currentIndex, playerState.isShuffled, playingPlaylistId]);
-
-    // 2. שמירה מחזורית כל 10 שניות למניעת איבוד התקדמות
-    useEffect(() => {
-        const interval = setInterval(() => {
-            if (playerState.isPlaying && stateLoadedRef.current && playerState.currentSong) {
-                saveStateToStorage(playerState, playingPlaylistId, currentTimeRef.current);
-            }
-        }, 10000);
-        return () => clearInterval(interval);
-    }, [playerState, playingPlaylistId]);
 
     const triggerAutoPlay = async () => {
         if (audioInitializedRef.current) return;
         if (!playerState.currentSong) return;
         console.log(`Auto-play attempt...`);
         try {
-            // אם אנחנו יודעים שהולך להיות דילוג, משתיקים את הנגן מראש ומפעילים טיימר ביטחון
-            if (initialSeekTimeRef.current > 0) {
-                audioService.setVolume(0);
-                unmuteSafetyTimerRef.current = setTimeout(() => audioService.setVolume(1), 3500);
-            }
-
             setPlayerState(prev => ({ ...prev, isPlaying: true }));
-            await audioService.playQueue(playerState.queue, playerState.currentIndex, playingPlaylistId || undefined);
             
+            await audioService.playQueue(
+                playerState.queue, 
+                playerState.currentIndex, 
+                playingPlaylistId || undefined,
+                initialSeekTimeRef.current > 0 ? initialSeekTimeRef.current : undefined
+            );
+            
+            initialSeekTimeRef.current = 0;
             audioInitializedRef.current = true;
         } catch (e) {
             console.error(`Auto-play failed:`, e);
@@ -1876,9 +1866,15 @@ const App: React.FC = () => {
             finalIndex = 0;
         }
         setPlayingPlaylistId(playlistId);
-        setPlayerState(prev => ({ ...prev, isOpen: true, isPlaying: true, currentSong: song, queue: finalQueue, currentIndex: finalIndex, isShuffled: prev.isShuffled, originalQueue: (playerState.isShuffled || isPlaylistStartAction) ? finalOriginalQueue : undefined, isExpanded: window.innerWidth < 768 }));    
+        setPlayerState(prev => {
+            const newState = { ...prev, isOpen: true, isPlaying: true, currentSong: song, queue: finalQueue, currentIndex: finalIndex, isShuffled: prev.isShuffled, originalQueue: (playerState.isShuffled || isPlaylistStartAction) ? finalOriginalQueue : undefined, isExpanded: window.innerWidth < 768 };
+            
+            // אנחנו שומרים אך ורק את רשימת השירים שעכשיו שלחנו למנוע (ללא אינדקס ושיר נוכחי)
+            saveStaticQueueToStorage(finalQueue, newState.originalQueue, prev.isShuffled, playlistId);
+            
+            return newState;
+        });  
 
-        // PASS PLAYLIST ID AS CONTEXT
         audioService.playQueue(finalQueue, finalIndex, playlistId || undefined);
     };
 
@@ -1994,7 +1990,7 @@ const App: React.FC = () => {
                 audioService.updateQueue(newState.queue, newState.currentIndex, playingPlaylistId || undefined);
             }
             
-            saveStateToStorage(newState, playingPlaylistId, 0);
+            saveStaticQueueToStorage(newState.queue, newState.originalQueue, newState.isShuffled, playingPlaylistId);
             return newState;
         });
     };
@@ -2003,7 +1999,6 @@ const App: React.FC = () => {
         if (playerState.isPlaying) { 
             audioService.pause(); 
             setPlayerState(p => ({ ...p, isPlaying: false })); 
-            saveStateToStorage(playerState, playingPlaylistId, currentTimeRef.current);
         } else {
             if (!audioInitializedRef.current && playerState.currentSong) { 
                 // בדיקת השתקה לפני הפעלה
@@ -2060,12 +2055,6 @@ const App: React.FC = () => {
         // App State Listener (Focus)
         const appStateListener = CapacitorApp.addListener('appStateChange', async ({ isActive }) => {
             console.log(`[App] App State Changed. Active: ${isActive}`);
-            // ברגע שהאפליקציה יורדת לרקע או נסגרת, אנחנו מיד שומרים את מיקום השיר
-            if (!isActive && stateLoadedRef.current && latestPlayerStateRef.current.currentSong) {
-                saveStateToStorage(latestPlayerStateRef.current, latestPlaylistIdRef.current, currentTimeRef.current);
-            }
-            
-            // סנכרון ממשק המשתמש מול הנייטיב כשהאפליקציה חוזרת מהרקע למסך
             if (isActive && Capacitor.isNativePlatform()) {
                 try {
                     const nativeInfo = await StreamifyMedia.getLastPlayedInfo() as any;
@@ -2084,23 +2073,6 @@ const App: React.FC = () => {
         });
         const timeListener = audioService.addListener('timeUpdate', (data: any) => { 
             currentTimeRef.current = data.currentTime; 
-            
-            // --- דילוג חכם ושקט (Silent Seek) ---
-            if (initialSeekTimeRef.current > 0 && data.currentTime > 0.1) {
-                const targetTime = initialSeekTimeRef.current;
-                initialSeekTimeRef.current = 0; // איפוס מיידי 
-                
-                console.log(`[App] Media loaded. Seeking silently to ${targetTime}s`);
-                audioService.seek(targetTime);
-
-                // נותנים לדילוג 150 מילישניות להתבצע בשקט, ואז מדליקים את הסאונד
-                setTimeout(() => {
-                    audioService.setVolume(1); // החזרת הקול לפעולה מלאה (במובייל זה המקסימום הפנימי של האפליקציה)
-                    if (unmuteSafetyTimerRef.current) {
-                        clearTimeout(unmuteSafetyTimerRef.current); // מבטלים את טיימר החירום כי הצלחנו
-                    }
-                }, 150);
-            }
         });
         const stateListener = audioService.addListener('stateChange', (data: any) => { setPlayerState(prev => ({ ...prev, isPlaying: data.isPlaying })); });
         const endListener = audioService.addListener('ended', () => { setPlayerState(prev => ({ ...prev, isPlaying: false })); });
