@@ -107,8 +107,15 @@ public class PlaybackService extends MediaSessionService {
         editor.putLong("last_position", currentPos);
         editor.putString("last_id", item.mediaId);
         
+        String savedUrl = null;
         if (item.localConfiguration != null) {
-            editor.putString("last_url", item.localConfiguration.uri.toString());
+            savedUrl = item.localConfiguration.uri.toString();
+        } else if (item.mediaMetadata != null && item.mediaMetadata.extras != null) {
+            savedUrl = item.mediaMetadata.extras.getString("url");
+        }
+        
+        if (savedUrl != null) {
+            editor.putString("last_url", savedUrl);
         }
         
         if (item.mediaMetadata != null) {
@@ -141,6 +148,7 @@ public class PlaybackService extends MediaSessionService {
                 if (contextId != null) {
                     extras.putString("contextId", contextId);
                 }
+                extras.putString("url", url);
 
                 MediaMetadata metadata = new MediaMetadata.Builder()
                     .setTitle(title)

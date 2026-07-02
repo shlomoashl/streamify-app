@@ -439,6 +439,7 @@ public class StreamifyMediaPlugin extends Plugin {
                 notifyListeners("onMediaEvent", resetTime);
 
                 Bundle extras = new Bundle();
+                extras.putString("url", url);
                 if (!contextId.isEmpty()) {
                     extras.putString("contextId", contextId);
                 }
@@ -506,8 +507,10 @@ public class StreamifyMediaPlugin extends Plugin {
                 for (int i = 0; i < items.length(); i++) {
                      try {
                          JSONObject item = items.getJSONObject(i);
+                         String itemUrl = item.getString("url");
                          
                          Bundle extras = new Bundle();
+                         extras.putString("url", itemUrl);
                          if (!contextId.isEmpty()) {
                              extras.putString("contextId", contextId);
                          }
@@ -576,8 +579,10 @@ public class StreamifyMediaPlugin extends Plugin {
                 for (int i = 0; i < items.length(); i++) {
                      try {
                          JSONObject item = items.getJSONObject(i);
+                         String itemUrl = item.getString("url");
                          
                          Bundle extras = new Bundle();
+                         extras.putString("url", itemUrl);
                          if (!contextId.isEmpty()) {
                              extras.putString("contextId", contextId);
                          }
@@ -651,6 +656,7 @@ public class StreamifyMediaPlugin extends Plugin {
         handler.post(() -> {
             try {
                 Bundle extras = new Bundle();
+                extras.putString("url", url);
                 if (!contextId.isEmpty()) {
                     extras.putString("contextId", contextId);
                 }

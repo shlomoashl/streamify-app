@@ -623,9 +623,9 @@ const App: React.FC = () => {
                         if (lastNative && lastNative.id) {
                             console.log("Restoring state from Native Service:", lastNative);
                             
-                            // הוסף את בלוק המשיכה של הזמן מהנייטיב כאן:
-                            if ((lastNative as any).savedTime && (lastNative as any).savedTime > 0) {
-                                initialSeekTimeRef.current = (lastNative as any).savedTime;
+                            // משיכת השנייה המדויקת מהנייטיב - התיקון: השם הנכון הוא position
+                            if (lastNative.position && lastNative.position > 0) {
+                                initialSeekTimeRef.current = lastNative.position;
                             }
                             const nativeSong: PlaylistItem = {
                                 id: lastNative.id,
