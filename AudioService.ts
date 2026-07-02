@@ -316,7 +316,7 @@ class AudioService {
         }
     }
 
-    public async playQueue(items: PlaylistItem[], startIndex: number, contextId?: string, startPosition?: number) {
+    public async playQueue(items: PlaylistItem[], startIndex: number, contextId?: string) {
         if (!items || items.length === 0) return;
         
         this.webQueue = items;
@@ -335,12 +335,11 @@ class AudioService {
                     duration: typeof item.duration === 'number' ? item.duration : 0
                 }));
                 
-                await (StreamifyMedia as any).playQueue({
+                await StreamifyMedia.playQueue({
                     items: mediaItems,
                     startIndex: startIndex,
-                    contextId: contextId,
-                    startPosition: startPosition
-                });
+                    contextId: contextId
+                } as PlayQueueOptions);
             } catch (e) {
                 console.error("Native playQueue failed", e);
             }
@@ -605,18 +604,6 @@ class AudioService {
         } else if (this.webAudio) {
             this.webAudio.volume = volume;
         }
-    }
-
-    public async getLastPlayedInfo(): Promise<any> {
-        if (this.isNative) {
-            try {
-                const info = await (StreamifyMedia as any).getLastPlayedInfo();
-                return info;
-            } catch (e) {
-                return null;
-            }
-        }
-        return null; 
     }
 
     public async cleanup() {

@@ -101,6 +101,14 @@ public class StreamifyMediaPlugin extends Plugin {
                             }
                             
                             notifyListeners("onMediaEvent", ret);
+
+                            // שמירת התקדמות הזמן בזיכרון באופן רציף גם כשהאפליקציה ממוזערת
+                            tickCount++;
+                            if (tickCount >= 5) { // כל 5 שניות
+                                tickCount = 0;
+                                SharedPreferences prefs = getContext().getSharedPreferences("StreamifyPlaybackState", Context.MODE_PRIVATE);
+                                prefs.edit().putLong("last_position", current).commit();
+                            }
                         }
                     } catch (Exception e) {
                         Log.e(TAG, "Error in progress loop", e);
@@ -385,23 +393,28 @@ public class StreamifyMediaPlugin extends Plugin {
 
     @PluginMethod
     public void getLastPlayedInfo(PluginCall call) {
-        SharedPreferences prefs = getContext().getSharedPreferences("StreamifyPlaybackState", Context.MODE_PRIVATE);
-        String lastId = prefs.getString("last_id", null);
+        Context context = getContext();
+        SharedPreferences prefs = context.getSharedPreferences("StreamifyPlaybackState", Context.MODE_PRIVATE);
         
-        if (lastId != null) {
+        String url = prefs.getString("last_url", null);
+        String id = prefs.getString("last_id", null);
+        
+        if (id != null && !id.isEmpty()) {
             JSObject ret = new JSObject();
-            ret.put("id", lastId);
-            ret.put("url", prefs.getString("last_url", ""));
+            ret.put("id", id);
+            ret.put("url", url != null ? url : ""); 
             ret.put("title", prefs.getString("last_title", ""));
             ret.put("artist", prefs.getString("last_artist", ""));
             ret.put("artwork", prefs.getString("last_artwork", ""));
-            ret.put("contextId", prefs.getString("last_context_id", ""));
-            // הכי חשוב: מיקום מדויק בשניות
-            ret.put("position", prefs.getLong("last_position", 0) / 1000.0);
+            ret.put("contextId", prefs.getString("last_context_id", null)); 
             
+            // שליפת הזמן שנשמר וחלוקה ל-1000 כדי להפוך לשניות
+            long lastPos = prefs.getLong("last_position", 0);
+            ret.put("savedTime", lastPos / 1000.0); 
+
             call.resolve(ret);
         } else {
-            call.reject("No last played info found");
+            call.resolve(); // Return empty if nothing saved
         }
     }
 
@@ -419,10 +432,7 @@ public class StreamifyMediaPlugin extends Plugin {
         String artwork = call.getString("artwork", "");
         String contextId = call.getString("contextId", "");
         
-        Double startPosition = call.getDouble("startPosition", -1.0);
-        long startPosMs = startPosition >= 0 ? (long)(startPosition * 1000) : C.TIME_UNSET;
-        
-        if (url == null) {        
+        if (url == null) {
             call.reject("No URL provided");
             return;
         }
@@ -439,7 +449,6 @@ public class StreamifyMediaPlugin extends Plugin {
                 notifyListeners("onMediaEvent", resetTime);
 
                 Bundle extras = new Bundle();
-                extras.putString("url", url);
                 if (!contextId.isEmpty()) {
                     extras.putString("contextId", contextId);
                 }
@@ -459,7 +468,7 @@ public class StreamifyMediaPlugin extends Plugin {
                     .setMediaMetadata(metadata)
                     .build();
 
-                controller.setMediaItems(java.util.Collections.singletonList(mediaItem), 0, startPosMs);
+                controller.setMediaItem(mediaItem);
                 controller.prepare();
                 controller.play();
                 
@@ -487,10 +496,7 @@ public class StreamifyMediaPlugin extends Plugin {
 
         JSArray items = call.getArray("items");
         Integer startIndex = call.getInt("startIndex", 0);
-        String contextId = call.getString("contextId", "");
-        
-        Double startPosition = call.getDouble("startPosition", -1.0);
-        long startPosMs = startPosition >= 0 ? (long)(startPosition * 1000) : C.TIME_UNSET;
+        String contextId = call.getString("contextId", ""); // Get queue context ID
 
         if (items == null || items.length() == 0) {
             call.reject("No items provided");
@@ -507,10 +513,8 @@ public class StreamifyMediaPlugin extends Plugin {
                 for (int i = 0; i < items.length(); i++) {
                      try {
                          JSONObject item = items.getJSONObject(i);
-                         String itemUrl = item.getString("url");
                          
                          Bundle extras = new Bundle();
-                         extras.putString("url", itemUrl);
                          if (!contextId.isEmpty()) {
                              extras.putString("contextId", contextId);
                          }
@@ -540,9 +544,10 @@ public class StreamifyMediaPlugin extends Plugin {
                     return;
                 }
 
-                controller.setMediaItems(mediaItems, startIndex, startPosMs);
+                controller.setMediaItems(mediaItems, startIndex, C.TIME_UNSET);
                 controller.prepare();
                 controller.play();
+
                 JSObject ret = new JSObject();
                 ret.put("action", "playbackState");
                 ret.put("value", true);
@@ -579,10 +584,8 @@ public class StreamifyMediaPlugin extends Plugin {
                 for (int i = 0; i < items.length(); i++) {
                      try {
                          JSONObject item = items.getJSONObject(i);
-                         String itemUrl = item.getString("url");
                          
                          Bundle extras = new Bundle();
-                         extras.putString("url", itemUrl);
                          if (!contextId.isEmpty()) {
                              extras.putString("contextId", contextId);
                          }
@@ -656,7 +659,6 @@ public class StreamifyMediaPlugin extends Plugin {
         handler.post(() -> {
             try {
                 Bundle extras = new Bundle();
-                extras.putString("url", url);
                 if (!contextId.isEmpty()) {
                     extras.putString("contextId", contextId);
                 }

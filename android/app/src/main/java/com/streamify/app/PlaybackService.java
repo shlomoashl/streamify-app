@@ -1,3 +1,4 @@
+
 package com.streamify.app;
 
 import android.content.Context;
@@ -28,33 +29,6 @@ public class PlaybackService extends MediaSessionService {
     private Player player;
     private static final String PREFS_NAME = "StreamifyPlaybackState";
 
-    // הלולאה החכמה: שומרת כל 2 שניות, אך ורק אם בוצעה התקדמות בפועל
-    private final android.os.Handler saveHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-    private final Runnable saveRunnable = new Runnable() {
-        private long lastSavedPosition = -1;
-        private String lastSavedId = "";
-
-        @Override
-        public void run() {
-            // הוספנו תנאי player.isPlaying() כדי לא לכתוב לדיסק כשהשיר בהשהייה (Pause)
-            if (player != null && player.isPlaying()) {
-                MediaItem currentItem = player.getCurrentMediaItem();
-                if (currentItem != null) {
-                    long currentPos = player.getCurrentPosition();
-                    String currentId = currentItem.mediaId != null ? currentItem.mediaId : "";
-
-                    // שמירה מתבצעת רק אם השיר התחלף, או שהזמן התקדם בלפחות שנייה אחת
-                    if (!currentId.equals(lastSavedId) || Math.abs(currentPos - lastSavedPosition) >= 1000) {
-                        saveEverythingImmediately(currentItem, currentPos);
-                        lastSavedId = currentId;
-                        lastSavedPosition = currentPos;
-                    }
-                }
-            }
-            saveHandler.postDelayed(this, 2000);
-        }
-    };  
-
     @OptIn(markerClass = UnstableApi.class)
     @Override
     public void onCreate() {
@@ -68,24 +42,37 @@ public class PlaybackService extends MediaSessionService {
             .setConnectTimeoutMs(30000)
             .setReadTimeoutMs(30000);
 
+        // --- כאן אנחנו מלבישים את המפענח שלנו על תעבורת הרשת ---
         DataSource.Factory xorDataSourceFactory = () -> new XorDataSource(httpDataSourceFactory.createDataSource());
 
         DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(this)
-            .setDataSourceFactory(xorDataSourceFactory);
+            .setDataSourceFactory(xorDataSourceFactory); // הנגן ימשוך נתונים רק דרך המפענח
 
         androidx.media3.exoplayer.DefaultLoadControl loadControl = new androidx.media3.exoplayer.DefaultLoadControl.Builder()
-            .setBufferDurationsMs(30000, 60000, 250, 500)
+            .setBufferDurationsMs(
+                30000, // מקסימום באפר (הגדלנו ל-30 שניות)
+                60000, // באפר להחזקה
+                250,   // באפר מינימלי לניגון - שונה ל-250ms לזירוז הפעלה ראשונית
+                500    // באפר לניגון אחרי ניתוק - שונה ל-500ms
+            )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build();
 
         player = new ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
-            .setLoadControl(loadControl)
+            .setLoadControl(loadControl) // <--- זה החלק שהיה חסר!
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .setHandleAudioBecomingNoisy(true)
             .build();            
 
-        // מחקנו את המאזין onMediaItemTransition - הלולאה עושה הכל!
+        player.addListener(new Player.Listener() {
+            @Override
+            public void onMediaItemTransition(@Nullable MediaItem mediaItem, int reason) {
+                if (mediaItem != null) {
+                    saveLastPlayedSong(mediaItem);
+                }
+            }
+        });
 
         AudioAttributes audioAttributes = new AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -94,29 +81,18 @@ public class PlaybackService extends MediaSessionService {
         player.setAudioAttributes(audioAttributes, true);
 
         mediaSession = new MediaSession.Builder(this, player).build();
-        
         restoreLastPlayedSong();
-        saveHandler.post(saveRunnable);
     }
 
-    // הפונקציה ששומרת הכל בצורה סינכרונית ובטוחה
-    private void saveEverythingImmediately(MediaItem item, long currentPos) {
-        SharedPreferences.Editor editor = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
+    private void saveLastPlayedSong(MediaItem item) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
         
-        // שמירת המיקום המדויק
-        editor.putLong("last_position", currentPos);
-        editor.putString("last_id", item.mediaId);
-        
-        String savedUrl = null;
         if (item.localConfiguration != null) {
-            savedUrl = item.localConfiguration.uri.toString();
-        } else if (item.mediaMetadata != null && item.mediaMetadata.extras != null) {
-            savedUrl = item.mediaMetadata.extras.getString("url");
+            editor.putString("last_url", item.localConfiguration.uri.toString());
         }
         
-        if (savedUrl != null) {
-            editor.putString("last_url", savedUrl);
-        }
+        editor.putString("last_id", item.mediaId);
         
         if (item.mediaMetadata != null) {
             editor.putString("last_title", item.mediaMetadata.title != null ? item.mediaMetadata.title.toString() : "");
@@ -124,19 +100,25 @@ public class PlaybackService extends MediaSessionService {
             if (item.mediaMetadata.artworkUri != null) {
                 editor.putString("last_artwork", item.mediaMetadata.artworkUri.toString());
             }
+            
+            // SAVE CONTEXT ID (Playlist ID)
             if (item.mediaMetadata.extras != null && item.mediaMetadata.extras.containsKey("contextId")) {
                 editor.putString("last_context_id", item.mediaMetadata.extras.getString("contextId"));
+            } else {
+                editor.remove("last_context_id");
             }
         }
         
-        editor.commit(); // כתיבה מיידית לדיסק!
+        // איפוס זמן התחלה לשיר חדש וכתיבה מיידית וסינכרונית לזיכרון
+        editor.putLong("last_position", 0);
+        editor.commit(); 
     }
-
     private void restoreLastPlayedSong() {
         try {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             String url = prefs.getString("last_url", null);
             
+            // Only restore if we have a URL and the player is currently empty
             if (url != null && player != null && player.getMediaItemCount() == 0) {
                 String id = prefs.getString("last_id", "");
                 String title = prefs.getString("last_title", "Streamify");
@@ -148,7 +130,6 @@ public class PlaybackService extends MediaSessionService {
                 if (contextId != null) {
                     extras.putString("contextId", contextId);
                 }
-                extras.putString("url", url);
 
                 MediaMetadata metadata = new MediaMetadata.Builder()
                     .setTitle(title)
@@ -161,6 +142,7 @@ public class PlaybackService extends MediaSessionService {
                     .setUri(url)
                     .setMediaId(id)
                     .setMimeType(MimeTypes.AUDIO_MP4)
+                    // .setMimeType(MimeTypes.AUDIO_WEBM)
                     .setMediaMetadata(metadata)
                     .build();
 
@@ -174,6 +156,8 @@ public class PlaybackService extends MediaSessionService {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
+        // Only stop if playback has actually finished.
+        // If playing, keep the service alive.
         if (player != null && !player.isPlaying() && player.getPlaybackState() == Player.STATE_ENDED) {
             stopSelf();
         }
@@ -181,19 +165,13 @@ public class PlaybackService extends MediaSessionService {
 
     @Override
     public void onDestroy() {
-        saveHandler.removeCallbacks(saveRunnable);
-        if (player != null) {
-            // שמירה סופית
-            MediaItem currentItem = player.getCurrentMediaItem();
-            if (currentItem != null) {
-                saveEverythingImmediately(currentItem, player.getCurrentPosition());
-            }
-            player.release();
-            player = null;
-        }
         if (mediaSession != null) {
             mediaSession.release();
             mediaSession = null;
+        }
+        if (player != null) {
+            player.release();
+            player = null;
         }
         super.onDestroy();
     }
