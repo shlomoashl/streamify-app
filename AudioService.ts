@@ -475,11 +475,22 @@ class AudioService {
     private async playWeb(item: PlaylistItem, url: string) {
         if (!this.webAudio) return;
 
+        // === התיקון: שחרור נעילת ה-Cache של נגן הצללים ===
+        // איפוס נגן הצללים משחרר את החיבור לדפדפן ומאפשר לנגן הראשי לגשת לאותו קישור בלי להיתקע
+        if (this.shadowAudio) {
+            this.shadowAudio.pause();
+            this.shadowAudio.removeAttribute('src'); 
+            this.shadowAudio.load(); 
+        }
+        // =================================================
+
         // ניקוי מופע HLS קודם אם קיים כדי למנוע זליגות זיכרון והתנגשויות
         if (this.hls) {
             this.hls.destroy();
             this.hls = null;
         }
+
+        // עדכון MediaSession...
 
         // עדכון MediaSession - מאפשר שליטה מהמקלדת, מסך הנעילה ותצוגת מטא-דאטה במערכת ההפעלה
         if ('mediaSession' in navigator) {
