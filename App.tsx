@@ -1391,25 +1391,21 @@ const App: React.FC = () => {
         }
     };
 
-    const updateMBDPlaylist = async (playlist: Playlist) => {
-        const artistName = "Mordechai Ben David";
-        // סינון השירים ששייכים לאמן המבוקש
-        const songsToFix = playlist.songs.filter(s => 
-            s.author.toLowerCase().includes(artistName.toLowerCase())
-        );
+    const repairPlaylistSongs = async (playlist: Playlist) => {
+        const songsToFix = playlist.songs;
 
         if (songsToFix.length === 0) {
-            alert(`לא נמצאו שירים של ${artistName} בפלייליסט הזה.`);
+            alert(`הפלייליסט ריק.`);
             return;
         }
 
         setConfirmModal({
             isOpen: true,
-            title: "עדכון שירים",
-            message: `נמצאו ${songsToFix.length} שירים של ${artistName}. האפליקציה תחפש להם קישורים חדשים ותעדכן אותם. להמשיך?`,
+            title: "תיקון ועדכון שירים",
+            message: `נמצאו ${songsToFix.length} שירים בפלייליסט. האפליקציה תסרוק ותחפש להם קישורים חדשים ותעדכן את ה-ID שלהם. פעולה זו עשויה לקחת קצת זמן. להמשיך?`,
             onConfirm: async () => {
                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                setGlobalLoading(`מתחיל עדכון עבור ${artistName}...`);
+                setGlobalLoading(`מתחיל סריקה ועדכון...`);
 
                 let successCount = 0;
 
@@ -1418,13 +1414,15 @@ const App: React.FC = () => {
                     setGlobalLoading(`מעדכן: ${oldSong.title} (${i + 1}/${songsToFix.length})`);
 
                     try {
-                        const query = encodeURIComponent(`${oldSong.title} ${artistName} audio`);
+                        // חיפוש חכם ומדויק לפי שם השיר ושם האמן
+                        const query = encodeURIComponent(`${oldSong.title} ${oldSong.author} audio`);
                         const res = await fetch(`${YOUTUBE_API_BASE}?action=search_and_download_video&query=${query}&search_engine=youtubemusic_songs`);
                         const data = await res.json();
 
                         if (data.success && data.results && data.results.length > 0) {
                             const bestMatch = data.results[0];
 
+                            // אם ה-ID אכן השתנה ביוטיוב, נחליף אותו
                             if (bestMatch.id !== oldSong.id) {
                                 await apiRemoveSong(playlist.id, oldSong.id);
                                 
@@ -1441,14 +1439,16 @@ const App: React.FC = () => {
                     } catch (e) {
                         console.error(`שגיאה בעדכון השיר ${oldSong.title}:`, e);
                     }
+                    
+                    // השהייה למניעת חסימת Rate Limit מיוטיוב
                     await new Promise(resolve => setTimeout(resolve, 600));
                 }
 
                 setGlobalLoading(null);
                 setConfirmModal({
                     isOpen: true,
-                    title: "העדכון הסתיים",
-                    message: `מתוך ${songsToFix.length} שירים, ${successCount} עודכנו בהצלחה.`,
+                    title: "הסריקה הסתיימה",
+                    message: `מתוך ${songsToFix.length} שירים, ${successCount} קיבלו מזהה (ID) חדש ועודכנו בהצלחה.`,
                     onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
                     isAlertOnly: true
                 });
@@ -2485,12 +2485,12 @@ const App: React.FC = () => {
                     <button 
                         className="w-full text-right p-2 hover:bg-white/10 rounded flex items-center gap-2 text-yellow-400" 
                         onClick={() => { 
-                            updateMBDPlaylist(item as Playlist); 
+                            repairPlaylistSongs(item as Playlist); 
                             closeContextMenu(); 
                         }}
                     >
                         <RefreshCcwIcon className="w-4 h-4" />
-                        <span>תקן שירים של MBD</span>
+                        <span>סרוק ותקן קישורי שירים</span>
                     </button>
                 )}                
                 {!isFolder && <button className="w-full text-right p-2 hover:bg-white/10 rounded flex items-center gap-2" onClick={() => { setMoveToFolderState({ visible: true, playlistId: item.id }); closeContextMenu(); }}> <FolderIcon className="w-4 h-4" /> <span>העבר לתיקייה</span> </button>}
