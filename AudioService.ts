@@ -18,6 +18,7 @@ class AudioService {
     private listeners: Map<AudioEventType, Set<ListenerCallback>> = new Map();
     private nativeListeners: PluginListenerHandle[] = [];
     private fallbackToWeb = false; // Flag to force web audio if native fails
+    private stopRetries: boolean = false;
 
     // Web/Windows Queue Management State
     private webQueue: PlaylistItem[] = [];
@@ -211,56 +212,56 @@ class AudioService {
 
 // בתוך AudioService.ts
 
-    private async prepareNextSong(index: number) {
+    private async prepareNextSong(index: number) {      
         if (!this.webQueue || index >= this.webQueue.length) return;
+
+        if (this.stopRetries) {
+            console.log("[AudioService] 🛑 חימום השיר הבא נעצר בגלל שהמשתמש לחץ Pause");
+            return;
+        }
 
         const song = this.webQueue[index];
         const streamUrl = this.getStreamUrl(song.id);
 
-        // --- התיקון לאנדרואיד ---
         if (this.isNative && !this.fallbackToWeb) {
             console.log(`[AudioService] Native Warmup Triggered for: ${song.title}`);
-            // אנחנו קוראים למטודה החדשה שיצרנו ב-Java
             StreamifyMedia.warmup({ url: streamUrl });
-            return; // עוצרים כאן, לא צריך לעשות fetch ב-Webview
+            return; 
         }
 
-        // --- לוגיקת ה-Web (Windows/Browser) נשארת כפי שהייתה ---
         try {
             console.log(`[AudioService] Web Warmup for: ${song.title}`);
             const controller = new AbortController();
             const response = await fetch(streamUrl, { signal: controller.signal });
+            
             if (!response.ok) {
-                // אם השרת החזיר שגיאה (השיר נמחק מיוטיוב/חסום)
                 console.warn(`[AudioService] 🚨 התגלה שיר שבור/חסום מראש: ${song.title}`);
-                this.badSongIds.add(song.id); // מכניסים לרשימה השחורה
-                // קסם: מדלגים מיד להכין את השיר הבא בתור!
-                this.prepareNextSong(index + 1);
+                this.badSongIds.add(song.id); 
+                
+                if (!this.stopRetries) {
+                    setTimeout(() => this.prepareNextSong(index + 1), 500);
+                }
                 return;
             }
 
-            // השרת ענה תקין. נבטל את הבקשה הזו אחרי 200 מילישניות 
-            // כדי לא להעמיס על האינטרנט של המשתמש.
             setTimeout(() => controller.abort(), 200);
 
-            // כעת נטען את השיר לתוך הזיכרון (Cache) בעזרת נגן הצללים 
-            // כדי שיופעל ב-0 שניות כשיגיע תורו
             if (!this.isNative || this.fallbackToWeb) {
                 if (!this.shadowAudio) this.shadowAudio = new Audio();
                 this.shadowAudio.src = streamUrl;
                 this.shadowAudio.preload = "auto";
-                this.shadowAudio.load(); // שואב את מטא-דאטה ותחילת השמע
+                this.shadowAudio.load(); 
             }
 
         } catch (e: any) {
-            if (e.name !== 'AbortError') {
-                // בשגיאת רשת זמנית, ננסה בכל זאת להכין את הבא
-                this.prepareNextSong(index + 1);
+            if (e.name !== 'AbortError' && !this.stopRetries) {
+                setTimeout(() => this.prepareNextSong(index + 1), 500);
             }
         }
     }
 
     public async play(item: PlaylistItem, url: string, contextId?: string) {
+        this.stopRetries = false;
         url = this.getStreamUrl(item.id);
         console.log(`[AudioService] Play request for "${item.title}" (ID: ${item.id})`);
 
@@ -404,13 +405,16 @@ class AudioService {
     public async skipTo(index: number) {
         if (!this.webQueue || this.webQueue.length <= index) return;
         
-        // --- חסר: דילוג מיידי (0 שניות) מעל שירים פגומים שזיהינו ברקע ---
         if (this.badSongIds.has(this.webQueue[index].id)) {
             console.log(`[AudioService] ⏩ מדלג אוטומטית על שיר פגום: ${this.webQueue[index].title}`);
-            this.skipTo(index + 1); // קופץ לבא אחריו באופן מיידי
+            
+            if (!this.stopRetries) {
+                setTimeout(() => this.skipTo(index + 1), 500); 
+            }
             return;
         }
 
+        this.stopRetries = false;
         this.webCurrentIndex = index;
         const song = this.webQueue[index];
         
@@ -580,24 +584,27 @@ class AudioService {
     }
 
     public async pause() {
+        this.stopRetries = true;
+        
         if (this.isNative && !this.fallbackToWeb) {
             await StreamifyMedia.pause();
         } else {
             this.webAudio?.pause();
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'paused';
-            }    
+            }
         }
     }
 
     public async resume() {
+        this.stopRetries = false;
         if (this.isNative && !this.fallbackToWeb) {
             await StreamifyMedia.resume();
         } else {
-            this.safePlay();
+            this.webAudio?.play();
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'playing';
-            }            
+            }
         }
     }
 
