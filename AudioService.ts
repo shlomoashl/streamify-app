@@ -124,7 +124,7 @@ class AudioService {
                     console.log(`[AudioService] Native Event: ${event.action}`, event.value || '');
                 }
 
-                switch(event.action) {
+switch(event.action) {
                     case 'timeUpdate':
                         this.emit('timeUpdate', { 
                             currentTime: event.value,
@@ -141,25 +141,40 @@ class AudioService {
                         }
                         break;
                     case 'playbackState':
-                        this.emit('stateChange', { isPlaying: event.value });
+                        // אכיפת פאוז: אם הנייטיב מנסה לנגן למרות שהמשתמש לחץ עצירה
+                        if (this.stopRetries && event.value === true) {
+                            console.log("[AudioService] 🛑 חוסם ניגון אוטומטי בנייטיב (המשתמש לחץ Pause)");
+                            StreamifyMedia.pause();
+                            this.emit('stateChange', { isPlaying: false });
+                        } else {
+                            this.emit('stateChange', { isPlaying: event.value });
+                        }
                         break;
                     case 'completed':
                         this.emit('ended', {});
                         break;
                     case 'itemTransition':
-                        // הנגן עבר לשיר חדש
                         this.emit('itemTransition', { id: event.value });
                         
-                        // ברגע זה ממש, אנחנו יורים פינג לשרת שיכין את השיר הבא!
+                        // עצירה מיידית אם הנייטיב דילג שיר בזמן שגיאה אבל הופעל פאוז
+                        if (this.stopRetries) {
+                            console.log("[AudioService] 🛑 דילוג נייטיב אוטומטי נחסם עקב Pause. עוצר...");
+                            StreamifyMedia.pause();
+                            return; // יציאה כדי לא להתחיל לחמם שירים ברקע
+                        }
+                        
                         const currentId = event.value;
                         const idx = this.webQueue.findIndex(item => item.id === currentId);
                         if (idx !== -1 && idx + 1 < this.webQueue.length) {
-                            // קוראים ישירות ל-prepareNextSong כדי להשתמש בחימום הנייטיב (Java) שבנינו
                             this.prepareNextSong(idx + 1);
                         }
                         break;                        
                     case 'error':
                         console.error('[AudioService] Native Plugin Error:', event.value);
+                        // אכיפת עצירה גם בשלב קבלת השגיאה
+                        if (this.stopRetries) {
+                            StreamifyMedia.pause();
+                        }
                         this.emit('error', { error: event.value });
                         break;
                     case 'remoteNext':
