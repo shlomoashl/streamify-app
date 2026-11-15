@@ -290,10 +290,10 @@ public class StreamifyMediaPlugin extends Plugin {
                 ret.put("userPaused", userPaused);
                 ret.put("encryptionEnabled", prefs.getBoolean("encryption_enabled", PlaybackService.isEncryptionEnabled()));
 
-                String queueJson = PlaybackService.readBestSavedQueue(context);
-                if (queueJson != null && !queueJson.isEmpty()) {
+                JSONArray queueArr = PlaybackService.readBestSavedQueue(context);
+                if (queueArr != null && queueArr.length() > 0) {
                     try {
-                        ret.put("queue", new JSArray(queueJson));
+                        ret.put("queue", new JSArray(queueArr.toString()));
                     } catch (Exception ignored) {}
                 }
 

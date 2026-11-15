@@ -327,7 +327,7 @@ public class PlaybackService extends MediaSessionService {
                 return fallback;
             } catch (Exception ignored) {}
         }
-        return null;
+        return new JSONObject();
     }
 
     public static JSONArray readBestSavedQueue(Context context) {
@@ -348,7 +348,7 @@ public class PlaybackService extends MediaSessionService {
                 return new JSONArray(qJson);
             } catch (Exception ignored) {}
         }
-        return null;
+        return new JSONArray();
     }
 
     private void persistCheckpointToDisk(
