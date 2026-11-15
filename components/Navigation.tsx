@@ -60,8 +60,6 @@ export const DesktopSidebar: React.FC<{
     folders: Folder[];
     playlists: Playlist[];
     expandedFolders: Set<string>;
-    isEncryptionEnabled: boolean;
-    onToggleEncryption: () => void;
     onSelectTab: (tab: ViewState) => void;
     onSelectPlaylist: (playlist: Playlist) => void;
     onToggleFolder: (folderId: string) => void;
@@ -77,8 +75,6 @@ export const DesktopSidebar: React.FC<{
     folders,
     playlists,
     expandedFolders,
-    isEncryptionEnabled,
-    onToggleEncryption,
     onSelectTab,
     onSelectPlaylist,
     onToggleFolder,
@@ -201,54 +197,7 @@ export const DesktopSidebar: React.FC<{
                 </div>
             </div>
 
-            <div className="flex flex-col mt-2 space-y-1 border-t border-white/10 pt-2">
-                <button
-                    onClick={onToggleEncryption}
-                    role="switch"
-                    aria-checked={isEncryptionEnabled}
-                    className={`p-3 text-sm flex items-center justify-between rounded-lg transition-colors ${
-                        isEncryptionEnabled
-                            ? 'text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20'
-                            : 'text-gray-400 hover:text-white hover:bg-white/10'
-                    }`}
-                    title={
-                        isEncryptionEnabled
-                            ? 'מצב הצפנה מופעל - לחץ לכיבוי'
-                            : 'מצב הצפנה כבוי - לחץ להפעלה'
-                    }
-                >
-                    <div className="flex items-center gap-3">
-                        <svg
-                            className="w-5 h-5 flex-shrink-0"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                        >
-                            {isEncryptionEnabled ? (
-                                <>
-                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                                </>
-                            ) : (
-                                <>
-                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                                    <path d="M7 11V7a5 5 0 0 1 9.9-1" />
-                                </>
-                            )}
-                        </svg>
-                        <span>מצב הצפנה: {isEncryptionEnabled ? 'מופעל' : 'כבוי'}</span>
-                    </div>
-                    <span
-                        className={`w-8 h-4 flex items-center rounded-full p-0.5 transition-colors ${
-                            isEncryptionEnabled ? 'bg-emerald-500 justify-start' : 'bg-gray-600 justify-end'
-                        }`}
-                    >
-                        <span className="bg-white w-3 h-3 rounded-full shadow-sm" />
-                    </span>
-                </button>
+            <div className="flex flex-col mt-2 space-y-0">
                 <button
                     onClick={onPromptRestartServer}
                     className="p-3 text-sm text-gray-500 hover:text-white flex items-center gap-3 hover:bg-white/10 rounded-lg transition-colors"

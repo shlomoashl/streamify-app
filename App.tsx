@@ -713,8 +713,6 @@ const App: React.FC = () => {
                     folders={folders}
                     playlists={playlists}
                     expandedFolders={expandedFolders}
-                    isEncryptionEnabled={isEncryptionEnabled}
-                    onToggleEncryption={handleToggleEncryption}
                     onSelectTab={setActiveTab}
                     onSelectPlaylist={(pl) => {
                         setSelectedPlaylist(pl);

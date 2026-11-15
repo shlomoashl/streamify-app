@@ -67,43 +67,28 @@ export const HomeView: React.FC<{
                             aria-checked={isEncryptionEnabled}
                             title={
                                 isEncryptionEnabled
-                                    ? 'מצב הצפנה מופעל (כל התעבורה, החיפושים, התמונות והזרם מוצפנים) - לחץ לכיבוי'
-                                    : 'מצב הצפנה כבוי (ללא הצפנה, הזרמה ישירה ומהירה) - לחץ להפעלה'
+                                    ? 'הצפנה מופעלת - לחץ לכיבוי'
+                                    : 'הצפנה כבויה - לחץ להפעלה'
                             }
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs md:text-sm font-bold transition-all border shadow-md ${
+                            className={`flex items-center gap-2 px-3 py-1.5 hover:scale-105 active:scale-95 rounded-full text-sm font-bold transition-all shadow-lg ${
                                 isEncryptionEnabled
-                                    ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300 hover:bg-emerald-500/30'
-                                    : 'bg-white/10 border-white/20 text-gray-300 hover:bg-white/15'
+                                    ? 'bg-spotify-primary text-black'
+                                    : 'bg-neutral-700 text-gray-300'
                             }`}
                         >
-                            <svg
-                                className="w-4 h-4 flex-shrink-0"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2.2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            >
-                                {isEncryptionEnabled ? (
-                                    <>
-                                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                                    </>
-                                ) : (
-                                    <>
-                                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                                        <path d="M7 11V7a5 5 0 0 1 9.9-1" />
-                                    </>
-                                )}
-                            </svg>
-                            <span>הצפנה: {isEncryptionEnabled ? 'מופעל' : 'כבוי'}</span>
+                            <span>הצפנה</span>
                             <span
-                                className={`w-7 h-4 flex items-center rounded-full p-0.5 transition-colors ${
-                                    isEncryptionEnabled ? 'bg-emerald-500 justify-start' : 'bg-gray-600 justify-end'
+                                className={`w-8 h-4 flex items-center rounded-full p-0.5 transition-colors ${
+                                    isEncryptionEnabled
+                                        ? 'bg-black/30 justify-start'
+                                        : 'bg-neutral-900/60 justify-end'
                                 }`}
                             >
-                                <span className="bg-white w-3 h-3 rounded-full shadow-sm transition-transform" />
+                                <span
+                                    className={`w-3 h-3 rounded-full shadow-sm transition-transform ${
+                                        isEncryptionEnabled ? 'bg-black' : 'bg-gray-400'
+                                    }`}
+                                />
                             </span>
                         </button>
 
