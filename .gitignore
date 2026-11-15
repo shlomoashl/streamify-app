@@ -14,3 +14,5 @@
 **/*.mkv
 **/*.mp3
 **/*.m4astreamfy.py 
+ 
+streamfy.py
