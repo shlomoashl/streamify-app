@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { PlayerState } from '../types';
 import { 
@@ -9,7 +8,7 @@ import {
 import { audioService } from '../AudioService';
 
 const formatTime = (seconds: number) => {
-    if (isNaN(seconds)) return "0:00";
+    if (!seconds || isNaN(seconds) || seconds < 0) return "0:00";
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
@@ -17,6 +16,7 @@ const formatTime = (seconds: number) => {
 
 interface PlayerProps {
     playerState: PlayerState;
+    initialTime?: number;
     onPlayPause: () => void;
     onNext: () => void;
     onPrev: () => void;
@@ -27,28 +27,53 @@ interface PlayerProps {
 }
 
 const Player: React.FC<PlayerProps> = ({
-    playerState, onPlayPause, onNext, onPrev, onShuffle, 
+    playerState, initialTime = 0, onPlayPause, onNext, onPrev, onShuffle, 
     onToggleExpand, onSeek, onRemoveCurrentSong
 }) => {
     const { currentSong, isPlaying, isExpanded, isShuffled } = playerState;
     
-    // --- ניהול זמן עצמאי של הנגן ---
-    const [currentTime, setCurrentTime] = useState(0);
-    const [duration, setDuration] = useState(0);
+    const [currentTime, setCurrentTime] = useState(initialTime || 0);
+    const [duration, setDuration] = useState(currentSong?.duration || 0);
+    const lastSongIdRef = useRef<string | null>(currentSong?.id || null);
+
+    // סנכרון הזמן הראשוני שנשמר (למשל בעלייה מחדש במולטימדיה לרכב)
+    useEffect(() => {
+        if (initialTime > 0 && currentTime === 0) {
+            setCurrentTime(initialTime);
+        }
+    }, [initialTime]);
+
+    useEffect(() => {
+        if (currentSong?.id !== lastSongIdRef.current) {
+            lastSongIdRef.current = currentSong?.id || null;
+            if (currentSong?.duration) {
+                setDuration(currentSong.duration);
+            }
+        }
+    }, [currentSong?.id, currentSong?.duration]);
 
     useEffect(() => {
         const timeListener = audioService.addListener('timeUpdate', (data: any) => { 
-            setCurrentTime(data.currentTime); 
-            if (data.duration > 0) setDuration(data.duration); 
+            if (typeof data.currentTime === 'number') {
+                setCurrentTime(data.currentTime);
+            }
+            if (data.duration && data.duration > 0) {
+                setDuration(data.duration);
+            }
         });
         const durationListener = audioService.addListener('durationChange', (data: any) => { 
-            if (data.duration > 0) setDuration(data.duration); 
+            if (data.duration && data.duration > 0) {
+                setDuration(data.duration);
+            }
         });
-        const transitionListener = audioService.addListener('itemTransition', () => {
-            setCurrentTime(0);
+        const transitionListener = audioService.addListener('itemTransition', (data: any) => {
+            if (data?.id && data.id !== lastSongIdRef.current) {
+                lastSongIdRef.current = data.id;
+                setCurrentTime(0);
+            }
         });
 
-        if (currentSong?.duration) {
+        if (currentSong?.duration && currentSong.duration > 0) {
             setDuration(currentSong.duration);
         }
 
@@ -58,7 +83,6 @@ const Player: React.FC<PlayerProps> = ({
             transitionListener.remove();
         };
     }, [currentSong?.id]);
-    // --------------------------------
 
     // Volume State
     const [volume, setVolume] = useState(1);
@@ -91,7 +115,11 @@ const Player: React.FC<PlayerProps> = ({
         return <VolumeIcon className="w-5 h-5" />;
     };
 
-    // Fallback data for empty state
+    const handleSeekInput = (newTime: number) => {
+        setCurrentTime(newTime);
+        onSeek(newTime);
+    };
+
     const displaySong = currentSong || {
         title: "בחר שיר לניגון",
         author: "Streamify",
@@ -105,7 +133,6 @@ const Player: React.FC<PlayerProps> = ({
         </div>
     );
 
-    // Full Screen Player (Mobile Overlay) - Remains fixed covering everything
     if (isExpanded && currentSong) {
         return (
             <div className="fixed inset-0 bg-gradient-to-b from-gray-900 to-black z-[100] flex flex-col p-6 overflow-y-auto animate-slide-up">
@@ -123,7 +150,14 @@ const Player: React.FC<PlayerProps> = ({
                 </div>
 
                 <div className="mb-6" dir="ltr">
-                    <input type="range" min={0} max={duration || 100} value={currentTime} onChange={e => onSeek(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-white" />
+                    <input
+                        type="range"
+                        min={0}
+                        max={duration || 100}
+                        value={currentTime}
+                        onChange={e => handleSeekInput(Number(e.target.value))}
+                        className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-white"
+                    />
                     <div className="flex justify-between text-xs text-gray-400 mt-2 font-mono">
                         <span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span>
                     </div>
@@ -140,15 +174,11 @@ const Player: React.FC<PlayerProps> = ({
         );
     }
 
-    // Bottom Bar Player (Desktop & Mobile Mini)
-    // Updated Design: Gradient from 0% opacity (top) to ~90% opacity (bottom) with backdrop blur.
-    // This allows a "silhouette" of the content behind to be visible at the bottom.
     return (
         <div 
             className={`w-full h-[100px] bg-gradient-to-b from-spotify-elevated/0 via-spotify-elevated/75 to-spotify-elevated/90 backdrop-blur-xl p-4 flex items-center justify-between z-40 flex-shrink-0 ${!isDisabled ? 'cursor-pointer hover:brightness-110' : ''} transition-all duration-300 ease-in-out`}
             onClick={(e) => { 
                 if (isDisabled) return;
-                // Only expand on click if on mobile (screen width < 768px)
                 if (window.innerWidth < 768 && !(e.target as HTMLElement).closest('button') && !(e.target as HTMLElement).closest('input')) {
                     onToggleExpand();
                 }
@@ -188,7 +218,7 @@ const Player: React.FC<PlayerProps> = ({
                         max={duration || 100} 
                         value={currentTime} 
                         disabled={isDisabled}
-                        onChange={e => {e.stopPropagation(); onSeek(Number(e.target.value))}} 
+                        onChange={e => {e.stopPropagation(); handleSeekInput(Number(e.target.value))}} 
                         className="flex-1 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-white disabled:opacity-50" 
                     />
                     <span>{formatTime(duration)}</span>
@@ -199,9 +229,7 @@ const Player: React.FC<PlayerProps> = ({
                 <button disabled={isDisabled} onClick={(e) => {e.stopPropagation(); onPlayPause()}} className={isDisabled ? 'opacity-50' : ''}>{isPlaying ? <PauseIcon className="w-8 h-8" /> : <PlayIcon className="w-8 h-8" />}</button>
             </div>
             
-            {/* Desktop Volume Control - Located on the far left (in RTL) and aligned down to match timeline */}
              <div className="hidden md:flex flex-col justify-center flex-1 items-start pl-4" dir="ltr">
-                 {/* Invisible spacer to match the Player's button row height + margin (h-6 icon + mb-4 = ~40px) */}
                  <div className="w-full h-6 mb-9 invisible" aria-hidden="true"></div>
                  
                  <div className="flex items-center gap-2">

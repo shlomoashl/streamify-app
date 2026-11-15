@@ -19,7 +19,8 @@ export class StorageService {
             'streamify_player_state': 'player_state.json',
             'streamify_last_playlist': 'last_playlist.json',
             'streamify_playlist_view_mode': 'settings_view.json',
-            'streamify_search_history': 'search_history.json'
+            'streamify_search_history': 'search_history.json',
+            'streamify_encryption_enabled': 'encryption_settings.json'
         };
         return mapping[key] || `${key}.json`;
     }

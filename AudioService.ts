@@ -1,57 +1,142 @@
-
 import { Capacitor, registerPlugin, PluginListenerHandle } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { PlaylistItem, StreamifyMediaPlugin, PlayOptions, PlayQueueOptions } from './types';
+import { PlaylistItem, StreamifyMediaPlugin, PlayOptions, LastPlayedInfo } from './types';
 import Hls from 'hls.js';
-import { YOUTUBE_API_BASE, SERVER_PUBLIC_URL } from './constants';
+import { YOUTUBE_API_BASE } from './constants';
+import { getInitialEncryptionEnabled } from './utils/encryptionUtils';
 
-// Define the plugin registry
 const StreamifyMedia = registerPlugin<StreamifyMediaPlugin>('StreamifyMedia');
 
-type AudioEventType = 'timeUpdate' | 'stateChange' | 'ended' | 'error' | 'durationChange' | 'remoteNext' | 'remotePrev' | 'itemTransition';
+export type AudioEventType =
+    | 'timeUpdate'
+    | 'stateChange'
+    | 'ended'
+    | 'error'
+    | 'durationChange'
+    | 'remoteNext'
+    | 'remotePrev'
+    | 'itemTransition'
+    | 'songSkipped'
+    | 'networkWait'
+    | 'networkRestored'
+    | 'networkLost';
+
 type ListenerCallback = (data: any) => void;
 
 class AudioService {
     private isNative: boolean;
+    private fallbackToWeb = false;
+
     private webAudio: HTMLAudioElement | null = null;
     private hls: Hls | null = null;
     private listeners: Map<AudioEventType, Set<ListenerCallback>> = new Map();
     private nativeListeners: PluginListenerHandle[] = [];
-    private fallbackToWeb = false; // Flag to force web audio if native fails
-    private stopRetries: boolean = false;
 
-    // Web/Windows Queue Management State
+    // State for Queue & Smart Playback Control
     private webQueue: PlaylistItem[] = [];
     private webCurrentIndex: number = 0;
-    private shadowAudio: HTMLAudioElement | null = null; // נגן צללים שטוען ברקע
-    private badSongIds: Set<string> = new Set(); // רשימה שחורה לשירים חסומים ביוטיוב
+    private userPaused: boolean = true;
+    private waitingForNetwork: boolean = false;
+    private lastKnownTime: number = 0;
+
+    // Web/Windows Error & Warmup Management
+    private consecutiveWebErrors: number = 0;
+    private webErrorRetryTimer: any = null;
+    private lastWarmedUpSongId: string | null = null;
+    private warmupAbortController: AbortController | null = null;
+    private encryptionEnabled: boolean = getInitialEncryptionEnabled();
 
     constructor() {
         this.isNative = Capacitor.isNativePlatform();
-        console.log(`[AudioService] Initializing. Native: ${this.isNative}`);
-        
+        console.log(`[AudioService] Initializing. Native: ${this.isNative}, Encryption: ${this.encryptionEnabled}`);
+
         if (this.isNative) {
             this.setupNativeListeners();
+            StreamifyMedia.setEncryptionMode({ enabled: this.encryptionEnabled }).catch(() => {});
         } else {
             this.setupWebAudio();
+            this.setupWebNetworkListeners();
         }
     }
 
-    private getStreamUrl(videoId: string): string {
-        // פשוט וישיר: האפליקציה תמיד מבקשת את ראוט האודיו הנקי.
-        // השרת כבר ידע לטפל ב-Range (הדילוגים והמשכיות השיר) בזכות התיקון ב-Python.
-        return `${YOUTUBE_API_BASE}/get_audio/${videoId}`;
+    public isEncryptionEnabled(): boolean {
+        return this.encryptionEnabled;
+    }
+
+    public async setEncryptionMode(enabled: boolean): Promise<void> {
+        const changed = this.encryptionEnabled !== enabled;
+        this.encryptionEnabled = enabled;
+        this.lastWarmedUpSongId = null;
+
+        if (this.isNative && !this.fallbackToWeb) {
+            try {
+                await StreamifyMedia.setEncryptionMode({ enabled });
+            } catch (e) {
+                console.warn('[AudioService] Failed to set native encryption mode:', e);
+            }
+        } else if (changed && this.webAudio && this.webQueue.length > 0) {
+            const currentSong = this.webQueue[this.webCurrentIndex];
+            if (currentSong && this.webAudio.src) {
+                const currentPos = this.webAudio.currentTime || this.lastKnownTime || 0;
+                const wasPlaying = !this.userPaused && !this.webAudio.paused;
+                const newUrl = this.getStreamUrl(currentSong.id);
+                if (wasPlaying) {
+                    this.playWeb(currentSong, newUrl, currentPos);
+                } else {
+                    this.webAudio.src = newUrl;
+                    this.webAudio.currentTime = currentPos;
+                }
+            }
+        }
+    }
+
+    public getStreamUrl(videoId: string): string {
+        return `${YOUTUBE_API_BASE}/get_audio/${videoId}?enc=${this.encryptionEnabled ? '1' : '0'}`;
+    }
+
+    public isUserPausedState(): boolean {
+        return this.userPaused;
+    }
+
+    private setupWebNetworkListeners() {
+        if (typeof window === 'undefined') return;
+
+        window.addEventListener('online', () => {
+            this.emit('networkRestored', {});
+            if (this.waitingForNetwork && !this.userPaused && this.webQueue.length > 0) {
+                console.log('[AudioService] Web network restored, resuming current song from saved position...');
+                this.waitingForNetwork = false;
+                const currentSong = this.webQueue[this.webCurrentIndex];
+                if (currentSong) {
+                    this.playWeb(currentSong, this.getStreamUrl(currentSong.id), this.lastKnownTime);
+                }
+            }
+        });
+
+        window.addEventListener('offline', () => {
+            this.emit('networkLost', {});
+        });
     }
 
     private setupWebAudio() {
-        if (this.webAudio) return; // מניעת אתחול כפול
+        if (this.webAudio) return;
 
-        console.log('[AudioService] Setting up Web Audio (HLS/HTML5)');
+        console.log('[AudioService] Setting up Web Audio (HTML5/HLS)');
         this.webAudio = new Audio();
-        
-        // מאזיני אירועים בסיסיים
+
         this.webAudio.addEventListener('timeupdate', () => {
-            this.emit('timeUpdate', { currentTime: this.webAudio?.currentTime || 0 });
+            const currentTime = this.webAudio?.currentTime || 0;
+            if (currentTime > 0) {
+                this.lastKnownTime = currentTime;
+            }
+            this.emit('timeUpdate', { currentTime });
+
+            // איפוס מונה שגיאות וחימום השיר הבא רק אחרי 5 שניות של ניגון יציב
+            if (currentTime >= 5 && !this.userPaused) {
+                this.consecutiveWebErrors = 0;
+                this.waitingForNetwork = false;
+                this.maybeWarmupNextWebSong();
+            }
         });
 
         this.webAudio.addEventListener('durationchange', () => {
@@ -60,77 +145,152 @@ class AudioService {
             }
         });
 
-
         this.webAudio.addEventListener('ended', () => {
-            console.log('[AudioService] Playback ended - Moving to next');
-            
-            if (this.webQueue.length > 0 && this.webCurrentIndex < this.webQueue.length - 1) {
-                // משתמשים בפונקציית הדילוג שלנו! היא עושה את הכל ב-0 שניות.
-                this.skipTo(this.webCurrentIndex + 1);
-                this.emit('itemTransition', { id: this.webQueue[this.webCurrentIndex].id });
+            if (this.userPaused) return;
+            console.log('[AudioService] Web playback ended - moving to next');
+
+            if (this.webQueue.length > 0) {
+                const nextIndex = (this.webCurrentIndex + 1) % this.webQueue.length;
+                if (this.webCurrentIndex < this.webQueue.length - 1) {
+                    this.skipTo(nextIndex);
+                    this.emit('itemTransition', { id: this.webQueue[nextIndex].id });
+                } else {
+                    this.emit('ended', {});
+                    this.emit('stateChange', { isPlaying: false });
+                }
             } else {
                 this.emit('ended', {});
                 this.emit('stateChange', { isPlaying: false });
             }
         });
 
-
         this.webAudio.addEventListener('play', () => {
-            console.log('[AudioService] Play started');
+            if (this.userPaused) {
+                // אם המשתמש לחץ Pause, חוסמים כל הפעלה אוטומטית בדפדפן
+                this.webAudio?.pause();
+                return;
+            }
             this.emit('stateChange', { isPlaying: true });
         });
-        
+
         this.webAudio.addEventListener('pause', () => {
-             console.log('[AudioService] Play paused');
-             this.emit('stateChange', { isPlaying: false });
+            this.emit('stateChange', { isPlaying: false });
         });
-        
+
         this.webAudio.addEventListener('error', (e) => {
-             console.error("[AudioService] HTML5 Audio Error:", e, this.webAudio?.error);
-             this.emit('error', { error: e });
+            console.error('[AudioService] HTML5 Audio Error:', e, this.webAudio?.error);
+            this.handleWebPlaybackError();
         });
-        
-        // הגדרות MediaSession (שליטה דרך המקלדת/מסך נעילה בווינדוס)
+
         if ('mediaSession' in navigator) {
             navigator.mediaSession.setActionHandler('play', () => this.resume());
             navigator.mediaSession.setActionHandler('pause', () => this.pause());
-            
             navigator.mediaSession.setActionHandler('nexttrack', () => {
-                if (this.webQueue.length > 0 && this.webCurrentIndex < this.webQueue.length - 1) {
-                    this.skipTo(this.webCurrentIndex + 1);
-                    this.emit('itemTransition', { id: this.webQueue[this.webCurrentIndex].id });
+                if (this.webQueue.length > 0) {
+                    const nextIdx = (this.webCurrentIndex + 1) % this.webQueue.length;
+                    this.skipTo(nextIdx);
+                    this.emit('itemTransition', { id: this.webQueue[nextIdx].id });
                     this.emit('remoteNext', {});
                 }
             });
-
             navigator.mediaSession.setActionHandler('previoustrack', () => {
-                 if (this.webQueue.length > 0 && this.webCurrentIndex > 0) {
-                    this.webCurrentIndex--;
-                    const prevSong = this.webQueue[this.webCurrentIndex];
-                    // שינוי 4: שימוש ב-getStreamUrl עבור כפתור "הקודם"
-                    this.playWeb(prevSong, this.getStreamUrl(prevSong.id));
-                    this.emit('itemTransition', { id: prevSong.id });
+                if (this.webQueue.length > 0) {
+                    const prevIdx = (this.webCurrentIndex - 1 + this.webQueue.length) % this.webQueue.length;
+                    this.skipTo(prevIdx);
+                    this.emit('itemTransition', { id: this.webQueue[prevIdx].id });
                     this.emit('remotePrev', {});
                 }
             });
         }
     }
 
+    private handleWebPlaybackError() {
+        if (this.webErrorRetryTimer) {
+            clearTimeout(this.webErrorRetryTimer);
+            this.webErrorRetryTimer = null;
+        }
+
+        // חוק ברזל: אם המשתמש לחץ Pause, לא מנסים שוב ולא מדלגים שיר!
+        if (this.userPaused) {
+            this.emit('stateChange', { isPlaying: false });
+            return;
+        }
+
+        // אם אין אינטרנט: לא מדלגים שיר! ממתינים לחזרת הרשת
+        if (!navigator.onLine) {
+            console.warn('[AudioService] Web error while offline. Waiting for network...');
+            this.waitingForNetwork = true;
+            this.emit('networkWait', { message: 'ממתין לחיבור רשת...' });
+            this.emit('stateChange', { isPlaying: false });
+            return;
+        }
+
+        // שגיאה בשיר ספציפי כשיש אינטרנט: מדלגים עד 3 פעמים ברצף בלבד
+        this.consecutiveWebErrors++;
+        console.warn(`[AudioService] Web track error (${this.consecutiveWebErrors}/3)`);
+
+        if (this.consecutiveWebErrors <= 3 && this.webQueue.length > 1) {
+            const failedSong = this.webQueue[this.webCurrentIndex];
+            if (failedSong) {
+                this.emit('songSkipped', { id: failedSong.id });
+            }
+            this.webErrorRetryTimer = setTimeout(() => {
+                if (!this.userPaused && this.webQueue.length > 0) {
+                    const nextIdx = (this.webCurrentIndex + 1) % this.webQueue.length;
+                    this.webCurrentIndex = nextIdx;
+                    const nextSong = this.webQueue[nextIdx];
+                    this.playWeb(nextSong, this.getStreamUrl(nextSong.id));
+                    this.emit('itemTransition', { id: nextSong.id });
+                }
+            }, 1200);
+        } else {
+            console.error('[AudioService] Max consecutive web errors reached. Stopping playback.');
+            this.userPaused = true;
+            this.consecutiveWebErrors = 0;
+            this.webAudio?.pause();
+            this.emit('stateChange', { isPlaying: false });
+            this.emit('error', { error: 'מספר שירים נכשלו בטעינה ברצף. הניגון נעצר.' });
+        }
+    }
+
+    private maybeWarmupNextWebSong() {
+        if (this.isNative && !this.fallbackToWeb) return;
+        if (this.userPaused || !this.webQueue || this.webQueue.length <= 1) return;
+
+        const currentSong = this.webQueue[this.webCurrentIndex];
+        if (!currentSong || this.lastWarmedUpSongId === currentSong.id) return;
+
+        const nextIdx = this.webCurrentIndex + 1;
+        if (nextIdx >= this.webQueue.length) return;
+
+        this.lastWarmedUpSongId = currentSong.id;
+        const nextSong = this.webQueue[nextIdx];
+        const nextUrl = this.getStreamUrl(nextSong.id);
+
+        if (this.warmupAbortController) {
+            this.warmupAbortController.abort();
+        }
+        this.warmupAbortController = new AbortController();
+
+        fetch(nextUrl, {
+            method: 'GET',
+            headers: { Range: 'bytes=0-1023' },
+            signal: this.warmupAbortController.signal
+        }).catch(() => {});
+    }
+
     private async setupNativeListeners() {
         try {
             const l1 = await StreamifyMedia.addListener('onMediaEvent', (event: any) => {
-                // Log state changes to help debug background/native issues
-                if (event.action === 'playbackState' || event.action === 'error' || event.action === 'remoteNext' || event.action === 'itemTransition') {
-                    console.log(`[AudioService] Native Event: ${event.action}`, event.value || '');
-                }
-
-switch(event.action) {
+                switch (event.action) {
                     case 'timeUpdate':
-                        this.emit('timeUpdate', { 
+                        if (typeof event.value === 'number' && event.value > 0) {
+                            this.lastKnownTime = event.value;
+                        }
+                        this.emit('timeUpdate', {
                             currentTime: event.value,
                             duration: event.duration
                         });
-                        
                         if (event.duration && event.duration > 0) {
                             this.emit('durationChange', { duration: event.duration });
                         }
@@ -141,40 +301,35 @@ switch(event.action) {
                         }
                         break;
                     case 'playbackState':
-                        // אכיפת פאוז: אם הנייטיב מנסה לנגן למרות שהמשתמש לחץ עצירה
-                        if (this.stopRetries && event.value === true) {
-                            console.log("[AudioService] 🛑 חוסם ניגון אוטומטי בנייטיב (המשתמש לחץ Pause)");
-                            StreamifyMedia.pause();
-                            this.emit('stateChange', { isPlaying: false });
-                        } else {
-                            this.emit('stateChange', { isPlaying: event.value });
-                        }
+                        this.emit('stateChange', { isPlaying: Boolean(event.value) });
                         break;
                     case 'completed':
                         this.emit('ended', {});
                         break;
-                    case 'itemTransition':
-                        this.emit('itemTransition', { id: event.value });
-                        
-                        // עצירה מיידית אם הנייטיב דילג שיר בזמן שגיאה אבל הופעל פאוז
-                        if (this.stopRetries) {
-                            console.log("[AudioService] 🛑 דילוג נייטיב אוטומטי נחסם עקב Pause. עוצר...");
-                            StreamifyMedia.pause();
-                            return; // יציאה כדי לא להתחיל לחמם שירים ברקע
-                        }
-                        
+                    case 'itemTransition': {
                         const currentId = event.value;
                         const idx = this.webQueue.findIndex(item => item.id === currentId);
-                        if (idx !== -1 && idx + 1 < this.webQueue.length) {
-                            this.prepareNextSong(idx + 1);
+                        if (idx !== -1) {
+                            this.webCurrentIndex = idx;
                         }
-                        break;                        
+                        this.emit('itemTransition', { id: currentId });
+                        break;
+                    }
+                    case 'songSkipped':
+                        this.emit('songSkipped', { id: event.value });
+                        break;
+                    case 'networkWait':
+                        this.emit('networkWait', { message: event.value });
+                        break;
+                    case 'networkRestored':
+                        this.emit('networkRestored', {});
+                        break;
+                    case 'networkLost':
+                        this.emit('networkLost', {});
+                        break;
                     case 'error':
                         console.error('[AudioService] Native Plugin Error:', event.value);
-                        // אכיפת עצירה גם בשלב קבלת השגיאה
-                        if (this.stopRetries) {
-                            StreamifyMedia.pause();
-                        }
+                        this.userPaused = true;
                         this.emit('error', { error: event.value });
                         break;
                     case 'remoteNext':
@@ -187,204 +342,119 @@ switch(event.action) {
             });
             this.nativeListeners.push(l1);
         } catch (e) {
-            console.warn("Error registering native listeners", e);
+            console.warn('[AudioService] Error registering native listeners', e);
         }
     }
-    
-    private async preloadNext(song: PlaylistItem) {
-        if (!this.isNative) return;
 
+    public async getLastPlayedInfo(): Promise<LastPlayedInfo | null> {
+        if (!this.isNative || this.fallbackToWeb) return null;
         try {
-            const fileName = `cache/${song.id}.mp3`;
-            try {
-                await Filesystem.stat({
-                    path: fileName,
-                    directory: Directory.Cache
-                });
-                console.log(`[AudioService] Preload: File ${fileName} already exists.`);
-                return;
-            } catch (e) {}
-
-            console.log(`[AudioService] Preloading next song: ${song.title}`);
-            
-            // אנחנו מוצאים את האינדקס של השיר המבוקש בתוך התור שלנו
-            const songIndex = this.webQueue.findIndex(s => s.id === song.id);
-            if (songIndex !== -1) {
-                // וקוראים לפונקציית צללים החדשה עם האינדקס הזה
-                this.prepareNextSong(songIndex);
+            const info = await StreamifyMedia.getLastPlayedInfo();
+            if (info && info.id) {
+                this.userPaused = Boolean(info.userPaused);
+                return info;
             }
-
-        } catch (error) {
-            console.error("[AudioService] Preload failed:", error);
+            return null;
+        } catch (e) {
+            console.warn('[AudioService] getLastPlayedInfo failed:', e);
+            return null;
         }
     }
 
-    /**
-     * Sends a background request to the server to prepare the m3u8 playlist AND the first segment.
-     * This reduces latency when the user eventually switches to this song.
-     * Optimized to barely use bandwidth.
-     */
-
-// בתוך AudioService.ts
-
-    private async prepareNextSong(index: number) {      
-        if (!this.webQueue || index >= this.webQueue.length) return;
-
-        if (this.stopRetries) {
-            console.log("[AudioService] 🛑 חימום השיר הבא נעצר בגלל שהמשתמש לחץ Pause");
-            return;
-        }
-
-        const song = this.webQueue[index];
-        const streamUrl = this.getStreamUrl(song.id);
-
-        if (this.isNative && !this.fallbackToWeb) {
-            console.log(`[AudioService] Native Warmup Triggered for: ${song.title}`);
-            StreamifyMedia.warmup({ url: streamUrl });
-            return; 
-        }
-
-        try {
-            console.log(`[AudioService] Web Warmup for: ${song.title}`);
-            const controller = new AbortController();
-            const response = await fetch(streamUrl, { signal: controller.signal });
-            
-            if (!response.ok) {
-                console.warn(`[AudioService] 🚨 התגלה שיר שבור/חסום מראש: ${song.title}`);
-                this.badSongIds.add(song.id); 
-                
-                if (!this.stopRetries) {
-                    setTimeout(() => this.prepareNextSong(index + 1), 500);
-                }
-                return;
-            }
-
-            setTimeout(() => controller.abort(), 200);
-
-            if (!this.isNative || this.fallbackToWeb) {
-                if (!this.shadowAudio) this.shadowAudio = new Audio();
-                this.shadowAudio.src = streamUrl;
-                this.shadowAudio.preload = "auto";
-                this.shadowAudio.load(); 
-            }
-
-        } catch (e: any) {
-            if (e.name !== 'AbortError' && !this.stopRetries) {
-                setTimeout(() => this.prepareNextSong(index + 1), 500);
-            }
-        }
-    }
-
-    public async play(item: PlaylistItem, url: string, contextId?: string) {
-        this.stopRetries = false;
-        url = this.getStreamUrl(item.id);
-        console.log(`[AudioService] Play request for "${item.title}" (ID: ${item.id})`);
+    public async play(item: PlaylistItem, url?: string, contextId?: string, startPosition?: number) {
+        this.userPaused = false;
+        this.waitingForNetwork = false;
+        const streamUrl = url || this.getStreamUrl(item.id);
 
         if (!this.isNative || this.fallbackToWeb) {
             if (!this.webAudio) this.setupWebAudio();
-            
-            this.playWeb(item, url);
+            this.playWeb(item, streamUrl, startPosition);
             return;
         }
 
-        if (this.isNative) {
+        try {
+            let playUrl = streamUrl;
             try {
-                let playUrl = url;
-                
-                // Check for local cached file
-                try {
-                    const fileName = `cache/${item.id}.mp3`;
-                    const stat = await Filesystem.stat({
-                        path: fileName,
-                        directory: Directory.Cache
-                    });
-                    if (stat) {
-                        const uriResult = await Filesystem.getUri({
-                            path: fileName,
-                            directory: Directory.Cache
-                        });
-                        playUrl = Capacitor.convertFileSrc(uriResult.uri);
-                        console.log(`[AudioService] Playing from local cache: ${playUrl}`);
-                    }
-                } catch (e) {
-                    // Local file not found, fallback to remote URL
+                const fileName = `cache/${item.id}.mp3`;
+                const stat = await Filesystem.stat({ path: fileName, directory: Directory.Cache });
+                if (stat) {
+                    const uriResult = await Filesystem.getUri({ path: fileName, directory: Directory.Cache });
+                    playUrl = Capacitor.convertFileSrc(uriResult.uri);
                 }
+            } catch {}
 
-                await StreamifyMedia.play({
-                    url: playUrl,
-                    id: item.id,
-                    title: item.title,
-                    artist: item.author,
-                    artwork: item.thumbnail || 'https://via.placeholder.com/500',
-                    duration: item.duration,
-                    autoPlay: true,
-                    contextId: contextId // Pass context ID to Native
-                } as PlayOptions);
-            } catch (e: any) {
-                console.error("Native play failed", e);
-                if (e.code === 'UNIMPLEMENTED' || e.message?.includes('UNIMPLEMENTED') || e.toString().includes('implemented')) {
-                    console.warn("[AudioService] Native plugin missing/unimplemented. Falling back to Web Audio.");
-                    this.fallbackToWeb = true;
-                    this.setupWebAudio();
-                    this.playWeb(item, url);
-                }
+            await StreamifyMedia.play({
+                url: playUrl,
+                id: item.id,
+                title: item.title,
+                artist: item.author,
+                artwork: item.thumbnail || 'https://via.placeholder.com/500',
+                duration: item.duration,
+                autoPlay: true,
+                contextId,
+                startPosition
+            } as PlayOptions);
+        } catch (e: any) {
+            console.error('[AudioService] Native play failed', e);
+            if (e.code === 'UNIMPLEMENTED' || e.message?.includes('UNIMPLEMENTED')) {
+                this.fallbackToWeb = true;
+                this.setupWebAudio();
+                this.playWeb(item, streamUrl, startPosition);
             }
         }
     }
 
-    public async playQueue(items: PlaylistItem[], startIndex: number, contextId?: string, startPosition?: number) {
+    public async playQueue(
+        items: PlaylistItem[],
+        startIndex: number,
+        contextId?: string,
+        startPosition?: number,
+        isShuffled?: boolean
+    ) {
         if (!items || items.length === 0) return;
-        
-        this.webQueue = items;
-        this.webCurrentIndex = startIndex;
-        
-        console.log(`[AudioService] Playing Queue. Size: ${items.length}, Start: ${startIndex}, Context: ${contextId}`);
+
+        this.userPaused = false;
+        this.waitingForNetwork = false;
+        this.webQueue = [...items];
+        this.webCurrentIndex = Math.max(0, Math.min(startIndex, items.length - 1));
 
         if (this.isNative && !this.fallbackToWeb) {
             try {
                 const mediaItems = items.map(item => ({
                     id: item.id,
-                    url: this.getStreamUrl(item.id), // <--- שינוי כאן: השתמשנו בפונקציה
+                    url: this.getStreamUrl(item.id),
                     title: item.title,
                     artist: item.author,
                     artwork: item.thumbnail || 'https://via.placeholder.com/500',
                     duration: typeof item.duration === 'number' ? item.duration : 0
                 }));
-                
-                await (StreamifyMedia as any).playQueue({
+
+                await StreamifyMedia.playQueue({
                     items: mediaItems,
-                    startIndex: startIndex,
-                    contextId: contextId,
-                    startPosition: startPosition
+                    startIndex: this.webCurrentIndex,
+                    contextId,
+                    isShuffled: Boolean(isShuffled),
+                    startPosition
                 });
             } catch (e) {
-                console.error("Native playQueue failed", e);
+                console.error('[AudioService] Native playQueue failed', e);
             }
         } else {
-            this.webQueue = [...items];
-            this.webCurrentIndex = startIndex;
-            
-            const song = items[startIndex];
+            if (!this.webAudio) this.setupWebAudio();
+            const song = items[this.webCurrentIndex];
             const url = this.getStreamUrl(song.id);
-            
-            this.playWeb(song, url);
-            
-            // קריאה מיידית כדי למנוע הקפאה של מערכת ההפעלה ברקע
-            Promise.resolve().then(() => {
-                this.prepareNextSong(startIndex + 1);
-            });
+            this.playWeb(song, url, startPosition);
         }
     }
 
-    public async updateQueue(queue: PlaylistItem[], index: number, contextId?: string) {
-        console.log(`[AudioService] Silent queue update. Size: ${queue.length}, Index: ${index}, Context: ${contextId}`);
-        
-        // 1. עדכון המשתנים הפנימיים ב-JS (קריטי כדי ש"הבא/הקודם" יעבדו נכון בווינדוס)
+    public async updateQueue(queue: PlaylistItem[], index: number, contextId?: string, isShuffled?: boolean) {
+        if (!queue || queue.length === 0) return;
+
         this.webQueue = [...queue];
-        this.webCurrentIndex = index;
+        this.webCurrentIndex = Math.max(0, Math.min(index, queue.length - 1));
+        this.lastWarmedUpSongId = null;
 
         if (this.isNative && !this.fallbackToWeb) {
-            // 2. עדכון הנייטיב (אנדרואיד) - ממירים את השירים לפורמט שנייטיב מבין, בדיוק כמו ב-playQueue
             try {
                 const mediaItems = queue.map(item => ({
                     id: item.id,
@@ -394,124 +464,97 @@ switch(event.action) {
                     artwork: item.thumbnail || 'https://via.placeholder.com/500',
                     duration: typeof item.duration === 'number' ? item.duration : 0
                 }));
-                
-                // משתמשים ב-any כדי למנוע שגיאות TypeScript למקרה שהפונקציה טרם הוגדרה ב-types.ts
-                if ((StreamifyMedia as any).updateQueue) {
-                    await (StreamifyMedia as any).updateQueue({
-                        items: mediaItems,
-                        startIndex: index,
-                        contextId: contextId
-                    });
-                } else {
-                    console.warn("[AudioService] Native updateQueue method not found in plugin.");
-                }
+
+                await StreamifyMedia.updateQueue({
+                    items: mediaItems,
+                    startIndex: this.webCurrentIndex,
+                    contextId,
+                    isShuffled: Boolean(isShuffled)
+                });
             } catch (e) {
-                console.error("Native updateQueue failed", e);
+                console.error('[AudioService] Native updateQueue failed', e);
             }
-        } else {
-            // 3. לוגיקת צללים לווינדוס/ווב: אחרי ששינינו את התור בשקט, 
-            // נגיד לנגן הצללים להתחיל לחמם את השיר *החדש* שאחרינו בתור המעורבב.
-            Promise.resolve().then(() => {
-                this.prepareNextSong(index + 1);
-            });
+        } else if (!this.userPaused) {
+            this.maybeWarmupNextWebSong();
         }
     }
-    
-    public async skipTo(index: number) {
-        if (!this.webQueue || this.webQueue.length <= index) return;
-        
-        if (this.badSongIds.has(this.webQueue[index].id)) {
-            console.log(`[AudioService] ⏩ מדלג אוטומטית על שיר פגום: ${this.webQueue[index].title}`);
-            
-            if (!this.stopRetries) {
-                setTimeout(() => this.skipTo(index + 1), 500); 
-            }
-            return;
-        }
 
-        this.stopRetries = false;
+    public async skipTo(index: number) {
+        if (!this.webQueue || index < 0 || index >= this.webQueue.length) return;
+
+        this.userPaused = false;
+        this.waitingForNetwork = false;
         this.webCurrentIndex = index;
+        this.lastKnownTime = 0;
         const song = this.webQueue[index];
-        
+
         if (this.isNative && !this.fallbackToWeb) {
             try {
-                // דילוג טבעי בתוך התור הקיים של אנדרואיד
-                await (StreamifyMedia as any).skipToIndex({ index });
-                
-                // הוספה קטנה: חייבים לבקש להכין את השיר הבא גם באנדרואיד אחרי שדילגנו!
-            
-            } catch (e) { console.error("Native skip failed", e); }
+                await StreamifyMedia.skipToIndex({ index });
+            } catch (e) {
+                console.error('[AudioService] Native skip failed', e);
+            }
         } else {
-            this.playWeb(song, this.getStreamUrl(song.id));
-            
-            Promise.resolve().then(() => {
-                this.prepareNextSong(index + 1);
-            });
+            this.playWeb(song, this.getStreamUrl(song.id), 0);
         }
     }
-    
-    public async addToQueue(item: PlaylistItem, url: string, contextId?: string) {
-        url = this.getStreamUrl(item.id);
+
+    public async addToQueue(item: PlaylistItem, url?: string, contextId?: string) {
+        const streamUrl = url || this.getStreamUrl(item.id);
+        this.webQueue.push(item);
+
         if (this.isNative && !this.fallbackToWeb) {
-            console.log(`[AudioService] Queueing next: "${item.title}"`);
             try {
                 await StreamifyMedia.addToQueue({
-                    url: url,
+                    url: streamUrl,
                     id: item.id,
                     title: item.title,
                     artist: item.author,
                     artwork: item.thumbnail || 'https://via.placeholder.com/500',
                     duration: item.duration,
-                    contextId: contextId // Pass context ID to Native
-                } as PlayOptions);
+                    contextId
+                });
             } catch (e) {
-                console.error("Failed to add to native queue", e);
+                console.error('[AudioService] Failed to add to native queue', e);
             }
-        } else {
-            // Web Fallback: Add to internal array
-            this.webQueue.push(item);
         }
     }
 
-    // New helper to handle Autoplay Policy errors gracefully
     private safePlay() {
-        if (!this.webAudio) return;
-        
+        if (!this.webAudio || this.userPaused) return;
+
         const playPromise = this.webAudio.play();
         if (playPromise !== undefined) {
             playPromise.catch(error => {
                 if (error.name === 'NotAllowedError') {
-                    console.warn("[AudioService] Autoplay blocked by policy. Waiting for user interaction.");
-                    // We don't throw, just log warning. The UI will show paused state.
+                    console.warn('[AudioService] Autoplay blocked by policy. Waiting for user interaction.');
                     this.emit('stateChange', { isPlaying: false });
-                } else {
-                    console.error("[AudioService] Playback failed:", error);
+                } else if (!this.userPaused) {
+                    console.error('[AudioService] Web playback failed:', error);
                 }
             });
         }
     }
 
-    private async playWeb(item: PlaylistItem, url: string) {
+    private playWeb(item: PlaylistItem, url: string, startPosition?: number) {
+        if (!this.webAudio) this.setupWebAudio();
         if (!this.webAudio) return;
 
-        // === התיקון: שחרור נעילת ה-Cache של נגן הצללים ===
-        // איפוס נגן הצללים משחרר את החיבור לדפדפן ומאפשר לנגן הראשי לגשת לאותו קישור בלי להיתקע
-        if (this.shadowAudio) {
-            this.shadowAudio.pause();
-            this.shadowAudio.removeAttribute('src'); 
-            this.shadowAudio.load(); 
+        if (this.webErrorRetryTimer) {
+            clearTimeout(this.webErrorRetryTimer);
+            this.webErrorRetryTimer = null;
         }
-        // =================================================
 
-        // ניקוי מופע HLS קודם אם קיים כדי למנוע זליגות זיכרון והתנגשויות
+        if (this.warmupAbortController) {
+            this.warmupAbortController.abort();
+            this.warmupAbortController = null;
+        }
+
         if (this.hls) {
             this.hls.destroy();
             this.hls = null;
         }
 
-        // עדכון MediaSession...
-
-        // עדכון MediaSession - מאפשר שליטה מהמקלדת, מסך הנעילה ותצוגת מטא-דאטה במערכת ההפעלה
         if ('mediaSession' in navigator) {
             navigator.mediaSession.metadata = new MediaMetadata({
                 title: item.title,
@@ -521,86 +564,71 @@ switch(event.action) {
             navigator.mediaSession.playbackState = 'playing';
         }
 
-        /**
-         * בדיקה האם מדובר בסטרים ישיר של אודיו (m4a).
-         * אם ה-URL מכיל את הראוט החדש שלנו, ננגן אותו ישירות דרך נגן ה-HTML5
-         * ללא שימוש ב-HLS.js, מה שמאפשר תמיכה מלאה ב-Range Requests (דילוגים והמשכיות).
-         */
         if (url.includes('/get_audio/')) {
-            console.log('[AudioService] Playing direct audio stream (m4a) natively');
             this.webAudio.src = url;
             this.webAudio.load();
             this.webAudio.onloadedmetadata = () => {
+                if (this.webAudio && startPosition && startPosition > 0) {
+                    this.webAudio.currentTime = startPosition;
+                }
                 this.safePlay();
             };
-            return; // יציאה מהפונקציה - אין צורך בלוגיקה של HLS
+            return;
         }
 
-        /**
-         * פולבאק ל-HLS: עבור האתר או במקרים בהם נדרש וידאו/סטרים מבוסס מקטעים.
-         */
         if (Hls.isSupported()) {
-            console.log('[AudioService] Using HLS.js for stream');
             this.hls = new Hls({
                 enableWorker: true,
                 lowLatencyMode: true,
-                debug: false,
-                manifestLoadTimeout: 15000,
-                levelLoadTimeout: 15000,
-                fragLoadTimeout: 15000,
-                fragLoadMaxRetry: 2,
-                fragLoadRetryDelay: 500,
-                fragLoadBackoffFactor: 1.2,
-            });            
-            
+                debug: false
+            });
+
             this.hls.loadSource(url);
             this.hls.attachMedia(this.webAudio);
-            
+
             this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                console.log('[AudioService] HLS Manifest parsed, starting playback');
+                if (this.webAudio && startPosition && startPosition > 0) {
+                    this.webAudio.currentTime = startPosition;
+                }
                 this.safePlay();
             });
-            
-            this.hls.on(Hls.Events.LEVEL_LOADED, (event, data) => {
+
+            this.hls.on(Hls.Events.LEVEL_LOADED, (_event, data) => {
                 if (data.details.totalduration) {
                     this.emit('durationChange', { duration: data.details.totalduration });
                 }
             });
 
-            this.hls.on(Hls.Events.ERROR, (event, data) => {
+            this.hls.on(Hls.Events.ERROR, (_event, data) => {
                 if (data.fatal) {
-                    switch (data.type) {
-                        case Hls.ErrorTypes.NETWORK_ERROR:
-                            console.log("[AudioService] HLS Network error, trying to recover...");
-                            this.hls?.startLoad();
-                            break;
-                        case Hls.ErrorTypes.MEDIA_ERROR:
-                            console.log("[AudioService] HLS Media error, trying to recover...");
-                            this.hls?.recoverMediaError();
-                            break;
-                        default:
-                            console.error("[AudioService] HLS Fatal error, destroying...", data);
-                            this.hls?.destroy();
-                            break;
-                    }
+                    this.hls?.destroy();
+                    this.handleWebPlaybackError();
                 }
             });
-
         } else if (this.webAudio.canPlayType('application/vnd.apple.mpegurl')) {
-            // תמיכה ב-Native HLS עבור דפדפני Safari
-            console.log('[AudioService] Using Native HLS');
             this.webAudio.src = url;
             this.webAudio.onloadedmetadata = () => {
+                if (this.webAudio && startPosition && startPosition > 0) {
+                    this.webAudio.currentTime = startPosition;
+                }
                 this.safePlay();
             };
-        } else {
-            console.error("[AudioService] No supported playback method found for this URL.");
         }
     }
 
     public async pause() {
-        this.stopRetries = true;
-        
+        this.userPaused = true;
+        this.waitingForNetwork = false;
+
+        if (this.webErrorRetryTimer) {
+            clearTimeout(this.webErrorRetryTimer);
+            this.webErrorRetryTimer = null;
+        }
+        if (this.warmupAbortController) {
+            this.warmupAbortController.abort();
+            this.warmupAbortController = null;
+        }
+
         if (this.isNative && !this.fallbackToWeb) {
             await StreamifyMedia.pause();
         } else {
@@ -612,11 +640,11 @@ switch(event.action) {
     }
 
     public async resume() {
-        this.stopRetries = false;
+        this.userPaused = false;
         if (this.isNative && !this.fallbackToWeb) {
             await StreamifyMedia.resume();
         } else {
-            this.webAudio?.play();
+            this.safePlay();
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'playing';
             }
@@ -624,6 +652,7 @@ switch(event.action) {
     }
 
     public async seek(seconds: number) {
+        this.lastKnownTime = seconds;
         if (this.isNative && !this.fallbackToWeb) {
             await StreamifyMedia.seek({ position: seconds });
         } else if (this.webAudio) {
@@ -632,7 +661,6 @@ switch(event.action) {
     }
 
     public async setVolume(volume: number) {
-        // volume is 0.0 to 1.0
         if (this.isNative && !this.fallbackToWeb) {
             await StreamifyMedia.setVolume({ volume });
         } else if (this.webAudio) {
@@ -641,10 +669,16 @@ switch(event.action) {
     }
 
     public async cleanup() {
+        if (this.webErrorRetryTimer) {
+            clearTimeout(this.webErrorRetryTimer);
+        }
+        if (this.warmupAbortController) {
+            this.warmupAbortController.abort();
+        }
         if (this.isNative) {
             this.nativeListeners.forEach(l => l.remove());
+            this.nativeListeners = [];
         }
-        
         if (this.hls) {
             this.hls.destroy();
             this.hls = null;

@@ -1,4 +1,3 @@
-
 export interface User {
     email: string;
     permissions?: string[];
@@ -25,8 +24,8 @@ export interface Playlist {
     collaborators?: string[];
     allowedUsers?: string[];
     isLikedSongs?: boolean; // For the special "Liked Songs" playlist
-    externalId?: string;    // New: Reference to YouTube/Spotify ID
-    externalType?: 'playlist' | 'album' | 'artist' | 'podcast' | 'spotify_playlist'; // New: Type of external content
+    externalId?: string;    // Reference to YouTube/Spotify ID
+    externalType?: 'playlist' | 'album' | 'artist' | 'podcast' | 'spotify_playlist';
 }
 
 export interface Folder {
@@ -46,7 +45,7 @@ export interface YouTubeSearchResult {
     title: string;
     author?: string;
     channel?: string;
-    duration: number | string; // Search API might return string
+    duration: number | string;
     thumbnail?: string;
     thumbnail_url?: string;
     type?: 'song' | 'playlist' | 'artist' | 'album' | 'podcast' | 'spotify_playlist' | 'video';
@@ -96,11 +95,16 @@ export interface PlayOptions {
     duration?: number;
     id?: string;
     autoPlay?: boolean;
+    contextId?: string;
+    startPosition?: number;
 }
 
 export interface PlayQueueOptions {
     items: MediaItem[];
     startIndex: number;
+    contextId?: string;
+    isShuffled?: boolean;
+    startPosition?: number;
 }
 
 export interface LastPlayedInfo {
@@ -109,22 +113,35 @@ export interface LastPlayedInfo {
     artist: string;
     artwork: string;
     url: string;
-    position: number; // seconds (optional if saved)
+    contextId?: string | null;
+    isShuffled?: boolean;
+    index?: number;
+    savedTime?: number;
+    isPlaying?: boolean;
+    isInitialBoot?: boolean;
+    userPaused?: boolean;
+    encryptionEnabled?: boolean;
+    queue?: MediaItem[];
 }
 
 export interface StreamifyMediaPlugin {
     initialize(): Promise<void>;
     play(options: PlayOptions): Promise<void>;
     playQueue(options: PlayQueueOptions): Promise<void>;
+    updateQueue(options: PlayQueueOptions): Promise<void>;
+    skipToIndex(options: { index: number }): Promise<void>;
     addToQueue(options: PlayOptions): Promise<void>;
     pause(): Promise<void>;
     resume(): Promise<void>;
     seek(options: { position: number }): Promise<void>;
     setVolume(options: { volume: number }): Promise<void>;
+    warmup(options: { url: string }): Promise<void>;
+    setEncryptionMode(options: { enabled: boolean }): Promise<{ enabled: boolean }>;
+    getEncryptionMode(): Promise<{ enabled: boolean }>;
     getDuration(): Promise<{ value: number }>;
     getCurrentTime(): Promise<{ value: number }>;
-    getPlaybackState(): Promise<{ isPlaying: boolean }>;
-    getLastPlayedInfo(): Promise<LastPlayedInfo>; // New method
+    getPlaybackState(): Promise<{ isPlaying: boolean; userPaused?: boolean }>;
+    getLastPlayedInfo(): Promise<LastPlayedInfo>;
     addListener(eventName: string, listenerFunc: (data: any) => void): Promise<{ remove: () => Promise<void> }>;
     removeAllListeners(): Promise<void>;
 }

@@ -1,15 +1,12 @@
-
 package com.streamify.app;
 
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
-import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.PowerManager;
 import android.util.Log;
 
 import androidx.annotation.OptIn;
@@ -18,7 +15,6 @@ import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.MimeTypes;
-import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.Timeline;
 import androidx.media3.common.util.UnstableApi;
@@ -33,55 +29,44 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.google.common.util.concurrent.ListenableFuture;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
-import java.util.ArrayList;
-import java.util.List;
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
 
-// Simple static event bus to communicate from Service to Plugin without external dependencies.
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 class PluginEvents {
     public interface PluginEventListener {
-        void onCommand(String command);
+        void onEvent(String action, Object value);
     }
-    private static PluginEventListener listener;
+
+    private static volatile PluginEventListener listener;
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     public static void setListener(PluginEventListener newListener) {
         listener = newListener;
     }
 
-    public static void post(String command) {
-        if (listener != null) {
-            mainHandler.post(() -> listener.onCommand(command));
+    public static void postEvent(String action, Object value) {
+        PluginEventListener current = listener;
+        if (current != null) {
+            mainHandler.post(() -> current.onEvent(action, value));
         }
     }
 }
 
 @CapacitorPlugin(name = "StreamifyMedia")
 public class StreamifyMediaPlugin extends Plugin {
+    private static final String TAG = "StreamifyMedia";
 
     private MediaController controller;
-    private static final String TAG = "StreamifyMedia";
+    private ListenableFuture<MediaController> controllerFuture;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    
+
     private boolean isSeeking = false;
     private boolean isProgressRunning = false;
-    private ListenableFuture<MediaController> controllerFuture;
-    
-    private PowerManager.WakeLock transitionWakeLock;
-    private WifiManager.WifiLock wifiLock;
 
-    // Error Handling State
-    private int consecutiveErrorCount = 0;
-    private long lastErrorTime = 0;
-    private static final int MAX_RETRIES = 3;
-    private static final long ERROR_RESET_TIME_MS = 60000; // 1 minute
-
-    private int tickCount = 0; // המונה שלנו
     private final Runnable progressRunnable = new Runnable() {
         @Override
         public void run() {
@@ -91,19 +76,19 @@ public class StreamifyMediaPlugin extends Plugin {
                         if (controller.isPlaying() || controller.getPlaybackState() == Player.STATE_BUFFERING) {
                             long current = controller.getCurrentPosition();
                             long duration = controller.getDuration();
-                            
+
                             JSObject ret = new JSObject();
                             ret.put("action", "timeUpdate");
                             ret.put("value", current / 1000.0);
-                            
+
                             if (duration != C.TIME_UNSET && duration > 0) {
                                 ret.put("duration", duration / 1000.0);
                             }
-                            
+
                             notifyListeners("onMediaEvent", ret);
                         }
                     } catch (Exception e) {
-                        Log.e(TAG, "Error in progress loop", e);
+                        Log.e(TAG, "Error in progressRunnable", e);
                     }
                 }
                 handler.postDelayed(this, 1000);
@@ -111,194 +96,86 @@ public class StreamifyMediaPlugin extends Plugin {
         }
     };
 
-    /**
-     * NATIVE PREFETCH HELPER - ENHANCED
-     * 1. Fetches the M3U8 playlist from the backend.
-     * 2. Parses it to find the FIRST segment URL.
-     * 3. Fetches a small chunk of that segment to force the stream to start flowing.
-     */
-    // בתוך StreamifyMediaPlugin.java
-
-    private void triggerServerSideWarmup(String m3u8Url) {
-        if (m3u8Url == null || m3u8Url.isEmpty()) return;
-        
-        new Thread(() -> {
-            HttpURLConnection playlistCon = null;
-            try {
-                Log.d(TAG, "Native Prefetch: Pinging Server -> " + m3u8Url);
-                URL urlObj = new URL(m3u8Url);
-                playlistCon = (HttpURLConnection) urlObj.openConnection();
-                playlistCon.setRequestMethod("GET");
-                
-                // תיקון קריטי: שנה מ-"Streamify" לזה שמוגדר ב-PlaybackService
-                playlistCon.setRequestProperty("User-Agent", "Streamify"); 
-                
-                playlistCon.setConnectTimeout(10000); 
-                playlistCon.setReadTimeout(10000);
-                
-                int responseCode = playlistCon.getResponseCode();
-                Log.d(TAG, "Prefetch Ping Result: " + responseCode);
-                
-            } catch (Exception e) {
-                Log.w(TAG, "Native Prefetch warning: " + e.getMessage());
-            } finally {
-                if (playlistCon != null) try { playlistCon.disconnect(); } catch(Exception ignored){}
-            }
-        }).start();
-    }
-
     @Override
     public void load() {
         super.load();
-        
         Context context = getContext();
-        
-        // Initialize WakeLock for smooth transitions in background (CPU)
-        PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-        if (powerManager != null) {
-            transitionWakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Streamify:TransitionWakeLock");
-            transitionWakeLock.setReferenceCounted(false);
-        }
 
-        // Initialize WifiLock to keep network radio active in background (Network)
-        WifiManager wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        if (wifiManager != null) {
-            wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "Streamify:WifiLock");
-            wifiLock.setReferenceCounted(false);
-        }
-        
+        PluginEvents.setListener((action, value) -> {
+            JSObject ret = new JSObject();
+            ret.put("action", action);
+            if (value != null) {
+                ret.put("value", value);
+            }
+            notifyListeners("onMediaEvent", ret);
+
+            if ("playbackState".equals(action)) {
+                boolean active = Boolean.TRUE.equals(value);
+                if (active) {
+                    startProgressUpdate();
+                } else {
+                    stopProgressUpdate();
+                }
+            }
+        });
+
+        connectController(context);
+    }
+
+    private void connectController(Context context) {
         handler.post(() -> {
-            SessionToken sessionToken = new SessionToken(context, new ComponentName(context, PlaybackService.class));
-            controllerFuture = new MediaController.Builder(context, sessionToken).buildAsync();
-            
-            controllerFuture.addListener(() -> {
-                try {
-                    controller = controllerFuture.get();
-                    setupControllerListeners();
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to connect to MediaSession", e);
-                }
-            }, ContextCompat.getMainExecutor(context));
-        });
-        
-        // Setup listener for events from our custom event bus
-        PluginEvents.setListener(command -> {
-            if (command != null) {
-                JSObject ret = new JSObject();
-                if (command.equals("next")) {
-                    ret.put("action", "remoteNext");
-                    acquireLocks(); // Keep awake for logic processing
-                } else if (command.equals("prev")) {
-                    ret.put("action", "remotePrev");
-                    acquireLocks();
-                }
-                notifyListeners("onMediaEvent", ret);
+            try {
+                SessionToken sessionToken = new SessionToken(context, new ComponentName(context, PlaybackService.class));
+                controllerFuture = new MediaController.Builder(context, sessionToken).buildAsync();
+                controllerFuture.addListener(() -> {
+                    try {
+                        controller = controllerFuture.get();
+                        setupControllerTimelineListener();
+                        if (controller.isPlaying()) {
+                            startProgressUpdate();
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to connect MediaController", e);
+                    }
+                }, ContextCompat.getMainExecutor(context));
+            } catch (Exception e) {
+                Log.e(TAG, "Error building MediaController", e);
             }
         });
     }
 
-    private void acquireLocks() {
-        if (transitionWakeLock != null) {
-            // Standard 10s WakeLock to allow processing
-            transitionWakeLock.acquire(10000); 
-        }
-    }
-    
-    private void setWifiLock(boolean active) {
-        if (wifiLock == null) return;
-        if (active) {
-            if (!wifiLock.isHeld()) {
-                wifiLock.acquire();
-                Log.d(TAG, "WifiLock acquired");
+    private void runWithController(PluginCall call, Runnable action) {
+        handler.post(() -> {
+            if (controller != null) {
+                action.run();
+                return;
             }
-        } else {
-            if (wifiLock.isHeld()) {
-                wifiLock.release();
-                Log.d(TAG, "WifiLock released");
+            if (controllerFuture != null) {
+                controllerFuture.addListener(() -> {
+                    try {
+                        if (controller == null) {
+                            controller = controllerFuture.get();
+                            setupControllerTimelineListener();
+                        }
+                        action.run();
+                    } catch (Exception e) {
+                        call.reject("Media Service connection failed: " + e.getMessage());
+                    }
+                }, ContextCompat.getMainExecutor(getContext()));
+            } else {
+                connectController(getContext());
+                call.reject("Media Service initializing, please retry");
             }
-        }
+        });
     }
 
-    @Override
-    protected void handleOnDestroy() {
-        super.handleOnDestroy();
-        PluginEvents.setListener(null);
-        if (controller != null) {
-            MediaController.releaseFuture(controllerFuture);
-        }
-        if (transitionWakeLock != null && transitionWakeLock.isHeld()) {
-            transitionWakeLock.release();
-        }
-        setWifiLock(false);
-    }
-
-    private void setupControllerListeners() {
+    private void setupControllerTimelineListener() {
         if (controller == null) return;
-
         controller.addListener(new Player.Listener() {
-            @Override
-            public void onMediaItemTransition(@androidx.annotation.Nullable MediaItem mediaItem, int reason) {
-                 if (mediaItem != null) {
-                     // Notify JS
-                     JSObject ret = new JSObject();
-                     ret.put("action", "itemTransition");
-                     ret.put("value", mediaItem.mediaId);
-                     notifyListeners("onMediaEvent", ret);
-                     
-                     // Wake up CPU briefly for the transition logic
-                     acquireLocks();
-                     
-                     // Reset error counter on successful transition
-                     consecutiveErrorCount = 0;
-                 }
-            }
-
             @Override
             public void onPlaybackStateChanged(int playbackState) {
                 if (isSeeking && playbackState == Player.STATE_READY) {
                     isSeeking = false;
-                }
-                
-                JSObject ret = new JSObject();
-                ret.put("action", "playbackState");
-                
-                boolean isPlayingOrBuffering = controller.getPlayWhenReady() && 
-                    (playbackState == Player.STATE_READY || playbackState == Player.STATE_BUFFERING);
-
-                // Manage WifiLock based on playback state to ensure streaming continues in background
-                setWifiLock(isPlayingOrBuffering);
-
-                if (playbackState == Player.STATE_ENDED) {
-                     ret.put("value", false);
-                     notifyListeners("onMediaEvent", ret);
-                     
-                     JSObject ended = new JSObject();
-                     ended.put("action", "completed");
-                     notifyListeners("onMediaEvent", ended);
-                     
-                     stopProgressUpdate();
-                     acquireLocks();
-                } else {
-                     ret.put("value", isPlayingOrBuffering);
-                     notifyListeners("onMediaEvent", ret);
-                     
-                     if (isPlayingOrBuffering) {
-                         startProgressUpdate();
-                     } else {
-                         stopProgressUpdate();
-                     }
-                }
-            }
-
-            @Override
-            public void onIsPlayingChanged(boolean isPlaying) {
-                if (isPlaying) {
-                    startProgressUpdate();
-                    setWifiLock(true);
-                    // Reset error count if we successfully started playing
-                    consecutiveErrorCount = 0;
-                } else {
-                    setWifiLock(false);
                 }
             }
 
@@ -313,54 +190,6 @@ public class StreamifyMediaPlugin extends Plugin {
                         notifyListeners("onMediaEvent", ret);
                     }
                 }
-            }
-            
-            @Override
-            public void onPlayerError(PlaybackException error) {
-                 Log.e(TAG, "Player Error: " + error.getMessage(), error);
-                 
-                 long now = System.currentTimeMillis();
-                 if (now - lastErrorTime > ERROR_RESET_TIME_MS) {
-                     consecutiveErrorCount = 0;
-                 }
-                 consecutiveErrorCount++;
-                 lastErrorTime = now;
-
-                 boolean isNetworkError = error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
-                                          error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
-                                          error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED; // Often network related
-
-                 // CRITICAL FIX: Stop madness.
-                 // 1. If it's a network error, don't skip aggressively, just pause/stop.
-                 // 2. If we hit max retries, stop to prevent focus hijacking.
-                 
-                 boolean shouldRetry = !isNetworkError && consecutiveErrorCount <= MAX_RETRIES && controller != null && controller.hasNextMediaItem();
-
-                 if (shouldRetry) {
-                     Log.i(TAG, "Attempting auto-skip to next track due to error (Retry " + consecutiveErrorCount + ")");
-                     controller.seekToNextMediaItem();
-                     controller.prepare();
-                     controller.play();
-                     return; // Give it a chance
-                 }
-
-                 // Fatal error or max retries reached or Network Error
-                 Log.e(TAG, "Stopping playback due to too many errors or network failure.");
-                 if (controller != null) {
-                     controller.stop(); // This releases audio focus automatically
-                 }
-
-                 String errorMsg = "Playback Error: " + error.getErrorCodeName();
-                 if (error.getCause() != null) {
-                     errorMsg += " (" + error.getCause().getMessage() + ")";
-                 }
-                 
-                 JSObject ret = new JSObject();
-                 ret.put("action", "error");
-                 ret.put("value", errorMsg);
-                 notifyListeners("onMediaEvent", ret);
-                 stopProgressUpdate();
-                 setWifiLock(false);
             }
         });
     }
@@ -378,6 +207,16 @@ public class StreamifyMediaPlugin extends Plugin {
         handler.removeCallbacks(progressRunnable);
     }
 
+    @Override
+    protected void handleOnDestroy() {
+        super.handleOnDestroy();
+        stopProgressUpdate();
+        PluginEvents.setListener(null);
+        if (controllerFuture != null) {
+            MediaController.releaseFuture(controllerFuture);
+        }
+    }
+
     @PluginMethod
     public void initialize(PluginCall call) {
         call.resolve();
@@ -385,95 +224,145 @@ public class StreamifyMediaPlugin extends Plugin {
 
     @PluginMethod
     public void getLastPlayedInfo(PluginCall call) {
-        Context context = getContext();
-        SharedPreferences prefs = context.getSharedPreferences("StreamifyPlaybackState", Context.MODE_PRIVATE);
-        
-        String url = prefs.getString("last_url", null);
-        String id = prefs.getString("last_id", null);
-        
-        if (id != null && !id.isEmpty()) {
-            JSObject ret = new JSObject();
-            ret.put("id", id);
-            ret.put("url", url != null ? url : ""); 
-            ret.put("title", prefs.getString("last_title", ""));
-            ret.put("artist", prefs.getString("last_artist", ""));
-            ret.put("artwork", prefs.getString("last_artwork", ""));
-            ret.put("contextId", prefs.getString("last_context_id", null)); 
-            
-            // שליפת הזמן שנשמר וחלוקה ל-1000 כדי להפוך לשניות
-            long lastPos = prefs.getLong("last_position", 0);
-            ret.put("savedTime", lastPos / 1000.0); 
+        handler.post(() -> {
+            Context context = getContext();
+            SharedPreferences prefs = context.getSharedPreferences(PlaybackService.PREFS_NAME, Context.MODE_PRIVATE);
+            JSONObject checkpoint = PlaybackService.readBestSavedCheckpoint(context);
 
-            call.resolve(ret);
-        } else {
-            call.resolve(); // Return empty if nothing saved
-        }
+            String id = checkpoint.optString("id", prefs.getString("last_id", null));
+            String url = checkpoint.optString("url", prefs.getString("last_url", ""));
+            String title = checkpoint.optString("title", prefs.getString("last_title", ""));
+            String artist = checkpoint.optString("artist", prefs.getString("last_artist", ""));
+            String artwork = checkpoint.optString("artwork", prefs.getString("last_artwork", ""));
+            String contextId = checkpoint.has("contextId") && !checkpoint.isNull("contextId")
+                    ? checkpoint.optString("contextId", null)
+                    : prefs.getString("last_context_id", null);
+            boolean isShuffled = checkpoint.optBoolean("isShuffled", prefs.getBoolean("is_shuffled", false));
+            int index = checkpoint.optInt("index", prefs.getInt("last_index", 0));
+            long savedPosMs = checkpoint.optLong("position", prefs.getLong("last_position", 0));
+            boolean userPaused = checkpoint.optBoolean("userPaused", prefs.getBoolean("user_paused", true));
+
+            // אם הנגן כרגע פעיל בזיכרון, ניקח את הנתונים החיים ממנו
+            if (controller != null && controller.getCurrentMediaItem() != null) {
+                MediaItem currentItem = controller.getCurrentMediaItem();
+                if (currentItem.mediaId != null && !currentItem.mediaId.isEmpty()) {
+                    id = currentItem.mediaId;
+                    index = controller.getCurrentMediaItemIndex();
+                    if (currentItem.mediaMetadata != null) {
+                        if (currentItem.mediaMetadata.title != null && currentItem.mediaMetadata.title.length() > 0) {
+                            title = currentItem.mediaMetadata.title.toString();
+                        }
+                        if (currentItem.mediaMetadata.artist != null && currentItem.mediaMetadata.artist.length() > 0) {
+                            artist = currentItem.mediaMetadata.artist.toString();
+                        }
+                        if (currentItem.mediaMetadata.artworkUri != null) {
+                            artwork = currentItem.mediaMetadata.artworkUri.toString();
+                        }
+                        if (currentItem.mediaMetadata.extras != null) {
+                            String liveCtx = currentItem.mediaMetadata.extras.getString("contextId");
+                            if (liveCtx != null && !liveCtx.isEmpty()) {
+                                contextId = liveCtx;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (id != null && !id.isEmpty()) {
+                JSObject ret = new JSObject();
+                ret.put("id", id);
+                ret.put("url", url != null ? url : "");
+                ret.put("title", title != null ? title : "");
+                ret.put("artist", artist != null ? artist : "");
+                ret.put("artwork", artwork != null ? artwork : "");
+                ret.put("contextId", (contextId != null && !contextId.isEmpty()) ? contextId : null);
+                ret.put("isShuffled", isShuffled);
+                ret.put("index", index);
+
+                if (controller != null && (controller.isPlaying() || controller.getCurrentPosition() > 1000)) {
+                    savedPosMs = Math.max(savedPosMs, controller.getCurrentPosition());
+                }
+                ret.put("savedTime", savedPosMs / 1000.0);
+
+                boolean activelyPlaying = controller != null && controller.isPlaying();
+                ret.put("isPlaying", activelyPlaying);
+                ret.put("isInitialBoot", !PlaybackService.isBootAutoPlayHandled());
+                ret.put("userPaused", userPaused);
+                ret.put("encryptionEnabled", prefs.getBoolean("encryption_enabled", PlaybackService.isEncryptionEnabled()));
+
+                String queueJson = PlaybackService.readBestSavedQueue(context);
+                if (queueJson != null && !queueJson.isEmpty()) {
+                    try {
+                        ret.put("queue", new JSArray(queueJson));
+                    } catch (Exception ignored) {}
+                }
+
+                call.resolve(ret);
+            } else {
+                call.resolve();
+            }
+        });
     }
 
     @OptIn(markerClass = UnstableApi.class)
     @PluginMethod
     public void play(PluginCall call) {
-        if (controller == null) {
-            call.reject("Media Service not connected yet");
+        String url = call.getString("url");
+        if (url == null || url.isEmpty()) {
+            call.reject("No URL provided");
             return;
         }
 
-        String url = call.getString("url");
+        String id = call.getString("id", "");
         String title = call.getString("title", "");
         String artist = call.getString("artist", "");
         String artwork = call.getString("artwork", "");
         String contextId = call.getString("contextId", "");
-        
         Double startPosition = call.getDouble("startPosition", -1.0);
-        long startPosMs = startPosition >= 0 ? (long)(startPosition * 1000) : C.TIME_UNSET;
-        
-        if (url == null) {        
-            call.reject("No URL provided");
-            return;
-        }
-        
-        handler.post(() -> {
+        long startPosMs = (startPosition != null && startPosition > 0) ? (long) (startPosition * 1000) : 0L;
+
+        runWithController(call, () -> {
             try {
-                stopProgressUpdate();
-                controller.stop(); 
-                controller.clearMediaItems();
-                
-                JSObject resetTime = new JSObject();
-                resetTime.put("action", "timeUpdate");
-                resetTime.put("value", 0);
-                notifyListeners("onMediaEvent", resetTime);
+                PlaybackService service = PlaybackService.getInstance();
+                if (service != null) {
+                    service.setUserPaused(false);
+                    PlaybackService.markBootAutoPlayHandled();
+
+                    JSONArray singleArr = new JSONArray();
+                    JSONObject obj = new JSONObject();
+                    obj.put("id", id);
+                    obj.put("url", url);
+                    obj.put("title", title);
+                    obj.put("artist", artist);
+                    obj.put("artwork", artwork);
+                    singleArr.put(obj);
+                    service.saveQueueToPrefs(singleArr, 0, contextId, false, startPosMs);
+                }
 
                 Bundle extras = new Bundle();
-                if (!contextId.isEmpty()) {
+                if (contextId != null && !contextId.isEmpty()) {
                     extras.putString("contextId", contextId);
                 }
 
                 MediaMetadata metadata = new MediaMetadata.Builder()
-                    .setTitle(title)
-                    .setArtist(artist)
-                    .setArtworkUri(Uri.parse(artwork))
-                    .setExtras(extras)
-                    .build();
+                        .setTitle(title)
+                        .setArtist(artist)
+                        .setArtworkUri(Uri.parse(artwork != null ? artwork : ""))
+                        .setExtras(extras)
+                        .build();
 
                 MediaItem mediaItem = new MediaItem.Builder()
-                    .setUri(url)
-                    .setMediaId(call.getString("id", ""))
-                    .setMimeType(MimeTypes.AUDIO_MP4)
-                    // .setMimeType(MimeTypes.AUDIO_WEBM)
-                    .setMediaMetadata(metadata)
-                    .build();
+                        .setUri(url)
+                        .setMediaId(id != null ? id : "")
+                        .setMimeType(MimeTypes.AUDIO_MP4)
+                        .setMediaMetadata(metadata)
+                        .build();
 
-                controller.setMediaItems(java.util.Collections.singletonList(mediaItem), 0, startPosMs);
+                controller.setMediaItems(Collections.singletonList(mediaItem), 0, startPosMs);
                 controller.prepare();
                 controller.play();
-                
-                JSObject ret = new JSObject();
-                ret.put("action", "playbackState");
-                ret.put("value", true);
-                notifyListeners("onMediaEvent", ret);
 
                 startProgressUpdate();
-                
                 call.resolve();
             } catch (Exception e) {
                 call.reject("Error playing audio: " + e.getMessage());
@@ -484,71 +373,57 @@ public class StreamifyMediaPlugin extends Plugin {
     @OptIn(markerClass = UnstableApi.class)
     @PluginMethod
     public void playQueue(PluginCall call) {
-        if (controller == null) {
-            call.reject("Media Service not connected yet");
-            return;
-        }
-
         JSArray items = call.getArray("items");
-        Integer startIndex = call.getInt("startIndex", 0);
-        String contextId = call.getString("contextId", "");
-        
-        Double startPosition = call.getDouble("startPosition", -1.0);
-        long startPosMs = startPosition >= 0 ? (long)(startPosition * 1000) : C.TIME_UNSET;
-
         if (items == null || items.length() == 0) {
             call.reject("No items provided");
             return;
         }
 
-        handler.post(() -> {
+        int startIndex = call.getInt("startIndex", 0);
+        String contextId = call.getString("contextId", "");
+        boolean isShuffled = Boolean.TRUE.equals(call.getBoolean("isShuffled", false));
+        Double startPosition = call.getDouble("startPosition", -1.0);
+        long requestedStartPosMs = (startPosition != null && startPosition > 0) ? (long) (startPosition * 1000) : -1L;
+
+        runWithController(call, () -> {
             try {
-                stopProgressUpdate();
-                controller.stop();
-                controller.clearMediaItems();
+                PlaybackService service = PlaybackService.getInstance();
+                Context context = getContext();
+                SharedPreferences prefs = context.getSharedPreferences(PlaybackService.PREFS_NAME, Context.MODE_PRIVATE);
+                JSONObject checkpoint = PlaybackService.readBestSavedCheckpoint(context);
 
-                List<MediaItem> mediaItems = new ArrayList<>();
-                for (int i = 0; i < items.length(); i++) {
-                     try {
-                         JSONObject item = items.getJSONObject(i);
-                         
-                         Bundle extras = new Bundle();
-                         if (!contextId.isEmpty()) {
-                             extras.putString("contextId", contextId);
-                         }
+                // הגנה קריטית למולטימדיה לרכב:
+                // אם מופעל אותו שיר שהיה שמור בזיכרון ולא הועבר startPosition מפורש, נשמור על המיקום השמור!
+                long finalStartPosMs = requestedStartPosMs;
+                JSONObject targetObj = items.optJSONObject(startIndex);
+                String targetId = targetObj != null ? targetObj.optString("id", "") : "";
+                String savedId = checkpoint.optString("id", prefs.getString("last_id", ""));
+                long savedPosMs = checkpoint.optLong("position", prefs.getLong("last_position", 0));
 
-                         MediaMetadata metadata = new MediaMetadata.Builder()
-                            .setTitle(item.optString("title"))
-                            .setArtist(item.optString("artist"))
-                            .setArtworkUri(Uri.parse(item.optString("artwork")))
-                            .setExtras(extras) // Store context for every item
-                            .build();
-
-                         MediaItem mediaItem = new MediaItem.Builder()
-                            .setUri(item.getString("url"))
-                            .setMediaId(item.getString("id"))
-                            .setMimeType(MimeTypes.AUDIO_MP4)
-                            // .setMimeType(MimeTypes.AUDIO_WEBM)
-                            .setMediaMetadata(metadata)
-                            .build();
-                         mediaItems.add(mediaItem);
-                     } catch (Exception e) {
-                         Log.e(TAG, "Error parsing queue item at index " + i, e);
-                     }
+                if (finalStartPosMs < 0 && !PlaybackService.isBootAutoPlayHandled()
+                        && targetId.equals(savedId) && savedPosMs > 1000) {
+                    Log.i(TAG, "Preserving saved car position (" + savedPosMs + "ms) for song " + targetId);
+                    finalStartPosMs = savedPosMs;
                 }
 
+                if (service != null) {
+                    service.setUserPaused(false);
+                    PlaybackService.markBootAutoPlayHandled();
+                    service.saveQueueToPrefs(items, startIndex, contextId, isShuffled, finalStartPosMs);
+                }
+
+                List<MediaItem> mediaItems = buildMediaItemList(items, contextId);
                 if (mediaItems.isEmpty()) {
-                    call.reject("Failed to parse any items");
+                    call.reject("Failed to parse queue items");
                     return;
                 }
 
-                controller.setMediaItems(mediaItems, startIndex, startPosMs);
+                int safeIndex = Math.max(0, Math.min(startIndex, mediaItems.size() - 1));
+                long seekPos = finalStartPosMs > 0 ? finalStartPosMs : 0L;
+
+                controller.setMediaItems(mediaItems, safeIndex, seekPos);
                 controller.prepare();
                 controller.play();
-                JSObject ret = new JSObject();
-                ret.put("action", "playbackState");
-                ret.put("value", true);
-                notifyListeners("onMediaEvent", ret);
 
                 startProgressUpdate();
                 call.resolve();
@@ -561,69 +436,48 @@ public class StreamifyMediaPlugin extends Plugin {
     @OptIn(markerClass = UnstableApi.class)
     @PluginMethod
     public void updateQueue(PluginCall call) {
-        if (controller == null) {
-            call.reject("Media Service not connected yet");
-            return;
-        }
-
         JSArray items = call.getArray("items");
-        Integer startIndex = call.getInt("startIndex", 0);
-        String contextId = call.getString("contextId", "");
-
         if (items == null || items.length() == 0) {
             call.reject("No items provided");
             return;
         }
 
-        handler.post(() -> {
+        int startIndex = call.getInt("startIndex", 0);
+        String contextId = call.getString("contextId", "");
+        boolean isShuffled = Boolean.TRUE.equals(call.getBoolean("isShuffled", false));
+
+        runWithController(call, () -> {
             try {
-                List<MediaItem> mediaItems = new ArrayList<>();
-                for (int i = 0; i < items.length(); i++) {
-                     try {
-                         JSONObject item = items.getJSONObject(i);
-                         
-                         Bundle extras = new Bundle();
-                         if (!contextId.isEmpty()) {
-                             extras.putString("contextId", contextId);
-                         }
-
-                         MediaMetadata metadata = new MediaMetadata.Builder()
-                            .setTitle(item.optString("title"))
-                            .setArtist(item.optString("artist"))
-                            .setArtworkUri(Uri.parse(item.optString("artwork")))
-                            .setExtras(extras)
-                            .build();
-
-                         MediaItem mediaItem = new MediaItem.Builder()
-                            .setUri(item.getString("url"))
-                            .setMediaId(item.getString("id"))
-                            .setMimeType(MimeTypes.AUDIO_MP4)
-                            .setMediaMetadata(metadata)
-                            .build();
-                         mediaItems.add(mediaItem);
-                     } catch (Exception e) {
-                         Log.e(TAG, "Error parsing queue item at index " + i, e);
-                     }
-                }
-
+                List<MediaItem> mediaItems = buildMediaItemList(items, contextId);
                 if (mediaItems.isEmpty()) {
-                    call.reject("Failed to parse any items");
+                    call.reject("Failed to parse queue items");
                     return;
                 }
 
-                // --- הקסם של עדכון שקט באנדרואיד ---
-                // 1. שומרים את המיקום המדויק (במילישניות) של השיר הנוכחי
                 long currentPos = controller.getCurrentPosition();
-                boolean wasPlaying = controller.isPlaying();
+                Context context = getContext();
+                SharedPreferences prefs = context.getSharedPreferences(PlaybackService.PREFS_NAME, Context.MODE_PRIVATE);
+                if (currentPos < 1000) {
+                    JSONObject checkpoint = PlaybackService.readBestSavedCheckpoint(context);
+                    currentPos = checkpoint.optLong("position", prefs.getLong("last_position", 0));
+                }
 
-                // 2. מחליפים את כל התור, מתמקמים על האינדקס החדש של השיר שמתנגן
-                // ומבקשים מהנגן להתחיל מאותו מיקום בדיוק שממנו הוא עצר
-                controller.setMediaItems(mediaItems, startIndex, currentPos);
+                PlaybackService service = PlaybackService.getInstance();
+                boolean shouldPlay = controller.isPlaying() && (service == null || !service.isUserPaused());
+
+                if (service != null) {
+                    service.saveQueueToPrefs(items, startIndex, contextId, isShuffled, currentPos);
+                }
+
+                int safeIndex = Math.max(0, Math.min(startIndex, mediaItems.size() - 1));
+                controller.setMediaItems(mediaItems, safeIndex, Math.max(0L, currentPos));
                 controller.prepare();
-                
-                // 3. ממשיכים את הניגון באותו המצב
-                if (wasPlaying) {
+
+                // שומרים על מצב ה-Pause של המשתמש! לעולם לא מדליקים אם המשתמש היה ב-Pause
+                if (shouldPlay) {
                     controller.play();
+                } else {
+                    controller.pause();
                 }
 
                 call.resolve();
@@ -633,47 +487,73 @@ public class StreamifyMediaPlugin extends Plugin {
         });
     }
 
-
     @OptIn(markerClass = UnstableApi.class)
-    @PluginMethod
-    public void addToQueue(PluginCall call) {
-        if (controller == null) {
-            call.reject("Media Service not connected yet");
-            return;
-        }
-
-        String url = call.getString("url");
-        String title = call.getString("title", "");
-        String artist = call.getString("artist", "");
-        String artwork = call.getString("artwork", "");
-        String contextId = call.getString("contextId", "");
-        
-        if (url == null) {
-            call.reject("No URL provided");
-            return;
-        }
-        
-        handler.post(() -> {
+    private List<MediaItem> buildMediaItemList(JSArray items, String contextId) {
+        List<MediaItem> mediaItems = new ArrayList<>();
+        for (int i = 0; i < items.length(); i++) {
             try {
+                JSONObject item = items.getJSONObject(i);
                 Bundle extras = new Bundle();
-                if (!contextId.isEmpty()) {
+                if (contextId != null && !contextId.isEmpty()) {
                     extras.putString("contextId", contextId);
                 }
 
                 MediaMetadata metadata = new MediaMetadata.Builder()
-                    .setTitle(title)
-                    .setArtist(artist)
-                    .setArtworkUri(Uri.parse(artwork))
-                    .setExtras(extras)
-                    .build();
+                        .setTitle(item.optString("title", ""))
+                        .setArtist(item.optString("artist", ""))
+                        .setArtworkUri(Uri.parse(item.optString("artwork", "")))
+                        .setExtras(extras)
+                        .build();
 
                 MediaItem mediaItem = new MediaItem.Builder()
-                    .setUri(url)
-                    .setMediaId(call.getString("id", ""))
-                    .setMimeType(MimeTypes.AUDIO_MP4)
-                    // .setMimeType(MimeTypes.AUDIO_WEBM)
-                    .setMediaMetadata(metadata)
-                    .build();
+                        .setUri(item.getString("url"))
+                        .setMediaId(item.getString("id"))
+                        .setMimeType(MimeTypes.AUDIO_MP4)
+                        .setMediaMetadata(metadata)
+                        .build();
+                mediaItems.add(mediaItem);
+            } catch (Exception e) {
+                Log.e(TAG, "Error parsing queue item at index " + i, e);
+            }
+        }
+        return mediaItems;
+    }
+
+    @OptIn(markerClass = UnstableApi.class)
+    @PluginMethod
+    public void addToQueue(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || url.isEmpty()) {
+            call.reject("No URL provided");
+            return;
+        }
+
+        String id = call.getString("id", "");
+        String title = call.getString("title", "");
+        String artist = call.getString("artist", "");
+        String artwork = call.getString("artwork", "");
+        String contextId = call.getString("contextId", "");
+
+        runWithController(call, () -> {
+            try {
+                Bundle extras = new Bundle();
+                if (contextId != null && !contextId.isEmpty()) {
+                    extras.putString("contextId", contextId);
+                }
+
+                MediaMetadata metadata = new MediaMetadata.Builder()
+                        .setTitle(title)
+                        .setArtist(artist)
+                        .setArtworkUri(Uri.parse(artwork != null ? artwork : ""))
+                        .setExtras(extras)
+                        .build();
+
+                MediaItem mediaItem = new MediaItem.Builder()
+                        .setUri(url)
+                        .setMediaId(id != null ? id : "")
+                        .setMimeType(MimeTypes.AUDIO_MP4)
+                        .setMediaMetadata(metadata)
+                        .build();
 
                 controller.addMediaItem(mediaItem);
                 call.resolve();
@@ -685,122 +565,156 @@ public class StreamifyMediaPlugin extends Plugin {
 
     @PluginMethod
     public void pause(PluginCall call) {
-        handler.post(() -> {
-            if (controller != null) {
-                controller.pause();
-                call.resolve();
-            } else {
-                call.reject("Service not connected");
+        runWithController(call, () -> {
+            PlaybackService service = PlaybackService.getInstance();
+            if (service != null) {
+                service.setUserPaused(true);
+                PlaybackService.markBootAutoPlayHandled();
             }
+            controller.pause();
+            stopProgressUpdate();
+            call.resolve();
         });
     }
 
     @PluginMethod
     public void resume(PluginCall call) {
-        handler.post(() -> {
-            if (controller != null) {
-                controller.play();
-                call.resolve();
-            } else {
-                call.reject("Service not connected");
+        runWithController(call, () -> {
+            PlaybackService service = PlaybackService.getInstance();
+            if (service != null) {
+                service.setUserPaused(false);
+                PlaybackService.markBootAutoPlayHandled();
             }
+            if (controller.getPlaybackState() == Player.STATE_IDLE) {
+                controller.prepare();
+            }
+            controller.play();
+            startProgressUpdate();
+            call.resolve();
         });
     }
 
     @PluginMethod
     public void seek(PluginCall call) {
         Double position = call.getDouble("position");
-        if (position != null && controller != null) {
-            handler.post(() -> {
-                isSeeking = true;
-                long seekMs = (long) (position * 1000);
-                controller.seekTo(seekMs);
-                
-                JSObject ret = new JSObject();
-                ret.put("action", "timeUpdate");
-                ret.put("value", position);
-                notifyListeners("onMediaEvent", ret);
-                
-                call.resolve();
-            });
-        } else {
-            call.reject("Invalid position or service not connected");
+        if (position == null) {
+            call.reject("Invalid position");
+            return;
         }
+        runWithController(call, () -> {
+            isSeeking = true;
+            long seekMs = Math.max(0L, (long) (position * 1000));
+            controller.seekTo(seekMs);
+
+            PlaybackService service = PlaybackService.getInstance();
+            if (service != null) {
+                service.saveExplicitSeekPosition(seekMs);
+            }
+
+            JSObject ret = new JSObject();
+            ret.put("action", "timeUpdate");
+            ret.put("value", position);
+            notifyListeners("onMediaEvent", ret);
+
+            call.resolve();
+        });
     }
 
     @PluginMethod
     public void setVolume(PluginCall call) {
         Float volume = call.getFloat("volume");
-        if (volume != null && controller != null) {
-            handler.post(() -> {
-                controller.setVolume(volume);
-                call.resolve();
-            });
+        if (volume == null) {
+            call.resolve();
+            return;
         }
-    }
-    
-    @PluginMethod
-    public void getDuration(PluginCall call) {
-        handler.post(() -> {
-            if (controller != null) {
-                long duration = controller.getDuration();
-                JSObject ret = new JSObject();
-                ret.put("value", (duration == C.TIME_UNSET) ? 0 : duration / 1000.0);
-                call.resolve(ret);
-            } else {
-                call.reject("Service not connected");
-            }
+        runWithController(call, () -> {
+            controller.setVolume(Math.max(0f, Math.min(1f, volume)));
+            call.resolve();
         });
     }
-    
+
+    @PluginMethod
+    public void getDuration(PluginCall call) {
+        runWithController(call, () -> {
+            long duration = controller.getDuration();
+            JSObject ret = new JSObject();
+            ret.put("value", (duration == C.TIME_UNSET || duration < 0) ? 0 : duration / 1000.0);
+            call.resolve(ret);
+        });
+    }
+
     @PluginMethod
     public void getCurrentTime(PluginCall call) {
-         handler.post(() -> {
-            if (controller != null) {
-                JSObject ret = new JSObject();
-                ret.put("value", controller.getCurrentPosition() / 1000.0);
-                call.resolve(ret);
-            } else {
-                call.reject("Service not connected");
-            }
+        runWithController(call, () -> {
+            JSObject ret = new JSObject();
+            ret.put("value", controller.getCurrentPosition() / 1000.0);
+            call.resolve(ret);
         });
     }
 
     @PluginMethod
     public void getPlaybackState(PluginCall call) {
-        handler.post(() -> {
-             if (controller != null) {
-                JSObject ret = new JSObject();
-                ret.put("isPlaying", controller.getPlayWhenReady() && 
-                    (controller.getPlaybackState() == Player.STATE_READY || controller.getPlaybackState() == Player.STATE_BUFFERING));
-                call.resolve(ret);
-             } else {
-                 call.reject("Service not connected");
-             }
+        runWithController(call, () -> {
+            PlaybackService service = PlaybackService.getInstance();
+            boolean userPaused = service != null && service.isUserPaused();
+            boolean isPlaying = !userPaused && controller.getPlayWhenReady() &&
+                    (controller.getPlaybackState() == Player.STATE_READY || controller.getPlaybackState() == Player.STATE_BUFFERING);
+            JSObject ret = new JSObject();
+            ret.put("isPlaying", isPlaying);
+            ret.put("userPaused", userPaused);
+            call.resolve(ret);
         });
     }
 
     @PluginMethod
     public void warmup(PluginCall call) {
         String url = call.getString("url");
-        if (url != null) {
-            // משתמשים בפונקציה הקיימת triggerServerSideWarmup כדי להעיר את השרת
-            triggerServerSideWarmup(url);
+        PlaybackService service = PlaybackService.getInstance();
+        if (url != null && service != null && !service.isUserPaused()) {
+            service.triggerServerSideWarmup(url);
         }
         call.resolve();
     }
 
     @PluginMethod
     public void skipToIndex(PluginCall call) {
-        handler.post(() -> {
-            if (controller != null) {
-                Integer index = call.getInt("index", 0);
-                controller.seekToDefaultPosition(index);
-                controller.play();
-                call.resolve();
-            } else {
-                call.reject("Player not initialized");
+        int index = call.getInt("index", 0);
+        runWithController(call, () -> {
+            PlaybackService service = PlaybackService.getInstance();
+            if (service != null) {
+                service.setUserPaused(false);
+                PlaybackService.markBootAutoPlayHandled();
             }
+            if (index >= 0 && index < controller.getMediaItemCount()) {
+                controller.seekToDefaultPosition(index);
+                controller.prepare();
+                controller.play();
+                startProgressUpdate();
+            }
+            call.resolve();
         });
+    }
+
+    @PluginMethod
+    public void setEncryptionMode(PluginCall call) {
+        boolean enabled = Boolean.TRUE.equals(call.getBoolean("enabled", true));
+        Context context = getContext();
+        PlaybackService.setEncryptionEnabledStatic(context, enabled);
+
+        JSObject ret = new JSObject();
+        ret.put("enabled", enabled);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getEncryptionMode(PluginCall call) {
+        Context context = getContext();
+        SharedPreferences prefs = context.getSharedPreferences(PlaybackService.PREFS_NAME, Context.MODE_PRIVATE);
+        boolean enabled = prefs.getBoolean("encryption_enabled", PlaybackService.isEncryptionEnabled());
+        PlaybackService.setEncryptionEnabledStatic(context, enabled);
+
+        JSObject ret = new JSObject();
+        ret.put("enabled", enabled);
+        call.resolve(ret);
     }
 }

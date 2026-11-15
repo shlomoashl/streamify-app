@@ -33,6 +33,7 @@
             android:name=".PlaybackService"
             android:foregroundServiceType="mediaPlayback"
             android:exported="true"
+            android:stopWithTask="false"
             android:supportsRtl="false"
             tools:replace="android:supportsRtl">
             <intent-filter>
@@ -40,13 +41,6 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </service>
-
-        <service
-            android:name="de.appplant.cordova.plugin.background.ForegroundService"
-            android:foregroundServiceType="mediaPlayback"
-            android:exported="false"
-            android:stopWithTask="false"
-        />
     </application>
 
     <uses-permission android:name="android.permission.INTERNET" />
