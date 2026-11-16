@@ -21,7 +21,9 @@ export class StorageService {
             'streamify_playlist_view_mode': 'settings_view.json',
             'streamify_search_history': 'search_history.json',
             'streamify_encryption_enabled': 'encryption_settings.json',
-            'streamify_repair_job': 'repair_job.json'
+            'streamify_repair_job': 'repair_job.json',
+            'streamify_recommended': 'streamify_recommended.json',
+            'streamify_recommended_by_category': 'streamify_categories.json'
         };
         return mapping[key] || `${key}.json`;
     }

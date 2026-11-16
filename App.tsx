@@ -164,6 +164,7 @@ const App: React.FC = () => {
         setSelectedPlaylist,
         streamifyCategory,
         handleSelectStreamifyCategory,
+        hydrateStreamifyCache,
         streamifyResults,
         setStreamifyResults,
         isLoadingStreamify,
@@ -406,8 +407,12 @@ const App: React.FC = () => {
                 const savedPlaylists = await storageService.loadData<Playlist[]>('streamify_cache_playlists', []);
                 const savedFolders = await storageService.loadData<Folder[]>('streamify_cache_folders', []);
                 const savedLiked = await storageService.loadData<Playlist | null>('streamify_cache_liked', null);
-                const savedStreamify = await storageService.loadData<any>('streamify_recommended', []);
-                if (savedStreamify) setStreamifyResults(savedStreamify);
+                const savedStreamifyByCat = await storageService.loadData<Record<string, YouTubeSearchResult[]> | null>(
+                    'streamify_recommended_by_category',
+                    null
+                );
+                const savedStreamify = await storageService.loadData<YouTubeSearchResult[]>('streamify_recommended', []);
+                hydrateStreamifyCache(savedStreamifyByCat, savedStreamify);
 
                 setPlaylists(savedPlaylists);
                 setFolders(savedFolders);

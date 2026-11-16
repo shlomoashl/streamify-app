@@ -180,6 +180,50 @@ export const useLibraryManager = (params: {
         if (currentUser) fetchLibrary();
     }, [currentUser, fetchLibrary]);
 
+    const persistCategoryCacheToStorage = useCallback(
+        (cat: StreamifyCategory, results: YouTubeSearchResult[]) => {
+            streamifyCategoryCacheRef.current.set(cat, results);
+            const allCategoriesObj: Record<string, YouTubeSearchResult[]> = {};
+            streamifyCategoryCacheRef.current.forEach((val, key) => {
+                if (Array.isArray(val) && val.length > 0) {
+                    allCategoriesObj[key] = val;
+                }
+            });
+            storageService.saveData('streamify_recommended_by_category', allCategoriesObj);
+            if (cat === 'all') {
+                storageService.saveData('streamify_recommended', results);
+            }
+        },
+        []
+    );
+
+    const hydrateStreamifyCache = useCallback(
+        (
+            savedByCategory?: Record<string, YouTubeSearchResult[]> | null,
+            fallbackAll?: YouTubeSearchResult[] | null
+        ) => {
+            if (savedByCategory && typeof savedByCategory === 'object') {
+                Object.entries(savedByCategory).forEach(([k, v]) => {
+                    if (Array.isArray(v) && v.length > 0) {
+                        streamifyCategoryCacheRef.current.set(k as StreamifyCategory, v);
+                    }
+                });
+            }
+            if (
+                Array.isArray(fallbackAll) &&
+                fallbackAll.length > 0 &&
+                !streamifyCategoryCacheRef.current.has('all')
+            ) {
+                streamifyCategoryCacheRef.current.set('all', fallbackAll);
+            }
+            const initialAll = streamifyCategoryCacheRef.current.get('all');
+            if (initialAll && initialAll.length > 0) {
+                setStreamifyResults(initialAll);
+            }
+        },
+        []
+    );
+
     const loadStreamifyRecommendations = useCallback(
         async (forceRefresh = false, targetCategory?: StreamifyCategory) => {
             const cat = targetCategory || streamifyCategory;
@@ -207,11 +251,8 @@ export const useLibraryManager = (params: {
                         Array.isArray(exploreData.results) &&
                         exploreData.results.length > 0
                     ) {
-                        streamifyCategoryCacheRef.current.set(cat, exploreData.results);
+                        persistCategoryCacheToStorage(cat, exploreData.results);
                         setStreamifyResults(exploreData.results);
-                        if (cat === 'all') {
-                            storageService.saveData('streamify_recommended', exploreData.results);
-                        }
                         return;
                     }
                 } catch (exploreErr) {
@@ -296,27 +337,56 @@ export const useLibraryManager = (params: {
                     new Map(allResults.map((item) => [item.id, item])).values()
                 ) as YouTubeSearchResult[];
 
-                streamifyCategoryCacheRef.current.set(cat, uniqueResults);
-                setStreamifyResults(uniqueResults);
-                if (cat === 'all') {
-                    storageService.saveData('streamify_recommended', uniqueResults);
+                if (forceRefresh) {
+                    for (let i = uniqueResults.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [uniqueResults[i], uniqueResults[j]] = [
+                            uniqueResults[j],
+                            uniqueResults[i]
+                        ];
+                    }
                 }
+
+                persistCategoryCacheToStorage(cat, uniqueResults);
+                setStreamifyResults(uniqueResults);
             } catch (e) {
                 console.error('Failed to load streamify recommendations', e);
             } finally {
                 setIsLoadingStreamify(false);
             }
         },
-        [isEncryptionEnabled, streamifyCategory]
+        [isEncryptionEnabled, persistCategoryCacheToStorage, streamifyCategory]
     );
 
     const handleSelectStreamifyCategory = useCallback(
         (cat: StreamifyCategory) => {
             setStreamifyCategory(cat);
+            setStreamifyDisplayLimit(24);
+            const cachedCat = streamifyCategoryCacheRef.current.get(cat);
+            if (cachedCat && cachedCat.length > 0) {
+                setStreamifyResults(cachedCat);
+                return;
+            }
+            setStreamifyResults([]);
             loadStreamifyRecommendations(false, cat);
         },
         [loadStreamifyRecommendations]
     );
+
+    // בכניסה לטאב Streamify: אם הקטגוריה הנוכחית כבר שמורה בזיכרון - נציג אותה מיד בלי לחפש מחדש!
+    // רק אם מעולם לא נטענה הקטגוריה הזו, נבצע טעינה ראשונית פעם אחת בלבד.
+    useEffect(() => {
+        if (activeTab === 'streamify') {
+            const cachedCat = streamifyCategoryCacheRef.current.get(streamifyCategory);
+            if (cachedCat && cachedCat.length > 0) {
+                if (streamifyResults !== cachedCat) {
+                    setStreamifyResults(cachedCat);
+                }
+            } else if (!isLoadingStreamify) {
+                loadStreamifyRecommendations(false, streamifyCategory);
+            }
+        }
+    }, [activeTab, streamifyCategory, isLoadingStreamify, loadStreamifyRecommendations]);
 
     const loadExternalPlaylist = useCallback(
         async (playlist: Playlist) => {
@@ -1201,6 +1271,7 @@ export const useLibraryManager = (params: {
         setSelectedPlaylist,
         streamifyCategory,
         handleSelectStreamifyCategory,
+        hydrateStreamifyCache,
         streamifyResults,
         setStreamifyResults,
         isLoadingStreamify,
