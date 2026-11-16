@@ -19,18 +19,14 @@ export const checkInitialUpdateState = (setUpdateAvailable: (val: boolean) => vo
     if (Capacitor.isNativePlatform()) {
         CapacitorUpdater.notifyAppReady().catch(() => {});
         CapacitorApp.getInfo()
-            .then(async (info) => {
+            .then((info) => {
                 const currentNativeVersion = `${info.version}_${info.build}`;
                 const savedNativeVersion = localStorage.getItem('streamify_native_apk_version');
-                if (savedNativeVersion && savedNativeVersion !== currentNativeVersion) {
-                    console.log(
-                        `[UpdateService] New APK detected (${savedNativeVersion} -> ${currentNativeVersion}). Resetting old OTA bundle to builtin.`
-                    );
-                    try {
-                        await CapacitorUpdater.reset();
-                    } catch {}
-                }
                 localStorage.setItem('streamify_native_apk_version', currentNativeVersion);
+                if (savedNativeVersion && savedNativeVersion !== currentNativeVersion) {
+                    localStorage.setItem('streamify_app_version_date', Date.now().toString());
+                    setUpdateAvailable(false);
+                }
             })
             .catch(() => {});
 

@@ -225,80 +225,85 @@ public class StreamifyMediaPlugin extends Plugin {
     @PluginMethod
     public void getLastPlayedInfo(PluginCall call) {
         handler.post(() -> {
-            Context context = getContext();
-            SharedPreferences prefs = context.getSharedPreferences(PlaybackService.PREFS_NAME, Context.MODE_PRIVATE);
-            JSONObject checkpoint = PlaybackService.readBestSavedCheckpoint(context);
+            try {
+                Context context = getContext();
+                SharedPreferences prefs = context.getSharedPreferences(PlaybackService.PREFS_NAME, Context.MODE_PRIVATE);
+                JSONObject checkpoint = PlaybackService.readBestSavedCheckpoint(context);
 
-            String id = checkpoint.optString("id", prefs.getString("last_id", null));
-            String url = checkpoint.optString("url", prefs.getString("last_url", ""));
-            String title = checkpoint.optString("title", prefs.getString("last_title", ""));
-            String artist = checkpoint.optString("artist", prefs.getString("last_artist", ""));
-            String artwork = checkpoint.optString("artwork", prefs.getString("last_artwork", ""));
-            String contextId = checkpoint.has("contextId") && !checkpoint.isNull("contextId")
-                    ? checkpoint.optString("contextId", null)
-                    : prefs.getString("last_context_id", null);
-            boolean isShuffled = checkpoint.optBoolean("isShuffled", prefs.getBoolean("is_shuffled", false));
-            int index = checkpoint.optInt("index", prefs.getInt("last_index", 0));
-            long savedPosMs = checkpoint.optLong("position", prefs.getLong("last_position", 0));
-            boolean userPaused = checkpoint.optBoolean("userPaused", prefs.getBoolean("user_paused", true));
+                String id = checkpoint.optString("id", prefs.getString("last_id", null));
+                String url = checkpoint.optString("url", prefs.getString("last_url", ""));
+                String title = checkpoint.optString("title", prefs.getString("last_title", ""));
+                String artist = checkpoint.optString("artist", prefs.getString("last_artist", ""));
+                String artwork = checkpoint.optString("artwork", prefs.getString("last_artwork", ""));
+                String contextId = checkpoint.has("contextId") && !checkpoint.isNull("contextId")
+                        ? checkpoint.optString("contextId", null)
+                        : prefs.getString("last_context_id", null);
+                boolean isShuffled = checkpoint.optBoolean("isShuffled", prefs.getBoolean("is_shuffled", false));
+                int index = checkpoint.optInt("index", 0);
+                long savedPosMs = checkpoint.optLong("position", 0L);
+                boolean userPaused = checkpoint.optBoolean("userPaused", prefs.getBoolean("user_paused", true));
 
-            // אם הנגן כרגע פעיל בזיכרון, ניקח את הנתונים החיים ממנו
-            if (controller != null && controller.getCurrentMediaItem() != null) {
-                MediaItem currentItem = controller.getCurrentMediaItem();
-                if (currentItem.mediaId != null && !currentItem.mediaId.isEmpty()) {
-                    id = currentItem.mediaId;
-                    index = controller.getCurrentMediaItemIndex();
-                    if (currentItem.mediaMetadata != null) {
-                        if (currentItem.mediaMetadata.title != null && currentItem.mediaMetadata.title.length() > 0) {
-                            title = currentItem.mediaMetadata.title.toString();
-                        }
-                        if (currentItem.mediaMetadata.artist != null && currentItem.mediaMetadata.artist.length() > 0) {
-                            artist = currentItem.mediaMetadata.artist.toString();
-                        }
-                        if (currentItem.mediaMetadata.artworkUri != null) {
-                            artwork = currentItem.mediaMetadata.artworkUri.toString();
-                        }
-                        if (currentItem.mediaMetadata.extras != null) {
-                            String liveCtx = currentItem.mediaMetadata.extras.getString("contextId");
-                            if (liveCtx != null && !liveCtx.isEmpty()) {
-                                contextId = liveCtx;
+                // אם הנגן כרגע פעיל בזיכרון, ניקח את הנתונים החיים ממנו
+                if (controller != null && controller.getCurrentMediaItem() != null) {
+                    MediaItem currentItem = controller.getCurrentMediaItem();
+                    if (currentItem.mediaId != null && !currentItem.mediaId.isEmpty()) {
+                        id = currentItem.mediaId;
+                        index = controller.getCurrentMediaItemIndex();
+                        if (currentItem.mediaMetadata != null) {
+                            if (currentItem.mediaMetadata.title != null && currentItem.mediaMetadata.title.length() > 0) {
+                                title = currentItem.mediaMetadata.title.toString();
+                            }
+                            if (currentItem.mediaMetadata.artist != null && currentItem.mediaMetadata.artist.length() > 0) {
+                                artist = currentItem.mediaMetadata.artist.toString();
+                            }
+                            if (currentItem.mediaMetadata.artworkUri != null) {
+                                artwork = currentItem.mediaMetadata.artworkUri.toString();
+                            }
+                            if (currentItem.mediaMetadata.extras != null) {
+                                String liveCtx = currentItem.mediaMetadata.extras.getString("contextId");
+                                if (liveCtx != null && !liveCtx.isEmpty()) {
+                                    contextId = liveCtx;
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            if (id != null && !id.isEmpty()) {
-                JSObject ret = new JSObject();
-                ret.put("id", id);
-                ret.put("url", url != null ? url : "");
-                ret.put("title", title != null ? title : "");
-                ret.put("artist", artist != null ? artist : "");
-                ret.put("artwork", artwork != null ? artwork : "");
-                ret.put("contextId", (contextId != null && !contextId.isEmpty()) ? contextId : null);
-                ret.put("isShuffled", isShuffled);
-                ret.put("index", index);
+                if (id != null && !id.isEmpty()) {
+                    JSObject ret = new JSObject();
+                    ret.put("id", id);
+                    ret.put("url", url != null ? url : "");
+                    ret.put("title", title != null ? title : "");
+                    ret.put("artist", artist != null ? artist : "");
+                    ret.put("artwork", artwork != null ? artwork : "");
+                    ret.put("contextId", (contextId != null && !contextId.isEmpty()) ? contextId : null);
+                    ret.put("isShuffled", isShuffled);
+                    ret.put("index", index);
 
-                if (controller != null && (controller.isPlaying() || controller.getCurrentPosition() > 1000)) {
-                    savedPosMs = Math.max(savedPosMs, controller.getCurrentPosition());
+                    if (controller != null && (controller.isPlaying() || controller.getCurrentPosition() > 1000)) {
+                        savedPosMs = Math.max(savedPosMs, controller.getCurrentPosition());
+                    }
+                    ret.put("savedTime", savedPosMs / 1000.0);
+
+                    boolean activelyPlaying = controller != null && controller.isPlaying();
+                    ret.put("isPlaying", activelyPlaying);
+                    ret.put("isInitialBoot", !PlaybackService.isBootAutoPlayHandled());
+                    ret.put("userPaused", userPaused);
+                    ret.put("encryptionEnabled", prefs.getBoolean("encryption_enabled", PlaybackService.isEncryptionEnabled()));
+
+                    JSONArray queueArr = PlaybackService.readBestSavedQueue(context);
+                    if (queueArr != null && queueArr.length() > 0) {
+                        try {
+                            ret.put("queue", new JSArray(queueArr.toString()));
+                        } catch (Exception ignored) {}
+                    }
+
+                    call.resolve(ret);
+                } else {
+                    call.resolve();
                 }
-                ret.put("savedTime", savedPosMs / 1000.0);
-
-                boolean activelyPlaying = controller != null && controller.isPlaying();
-                ret.put("isPlaying", activelyPlaying);
-                ret.put("isInitialBoot", !PlaybackService.isBootAutoPlayHandled());
-                ret.put("userPaused", userPaused);
-                ret.put("encryptionEnabled", prefs.getBoolean("encryption_enabled", PlaybackService.isEncryptionEnabled()));
-
-                JSONArray queueArr = PlaybackService.readBestSavedQueue(context);
-                if (queueArr != null && queueArr.length() > 0) {
-                    try {
-                        ret.put("queue", new JSArray(queueArr.toString()));
-                    } catch (Exception ignored) {}
-                }
-
-                call.resolve(ret);
-            } else {
+            } catch (Throwable t) {
+                Log.e(TAG, "Error in getLastPlayedInfo", t);
                 call.resolve();
             }
         });

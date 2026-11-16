@@ -397,7 +397,7 @@ const App: React.FC = () => {
                 const normalizedEnc = Boolean(savedEnc);
                 setIsEncryptionEnabled(normalizedEnc);
                 persistEncryptionEnabled(normalizedEnc);
-                await audioService.setEncryptionMode(normalizedEnc);
+                audioService.setEncryptionMode(normalizedEnc).catch(() => {});
 
                 const savedEmail = await storageService.loadData<string>('streamify_user_email', '');
                 if (savedEmail) {
@@ -424,7 +424,10 @@ const App: React.FC = () => {
                 const savedHistory = await storageService.loadData<string[]>('streamify_search_history', []);
                 setSearchHistory(savedHistory || []);
 
-                await restoreInitialPlayerState(savedPlaylists);
+                await Promise.race([
+                    restoreInitialPlayerState(savedPlaylists),
+                    new Promise((resolve) => setTimeout(resolve, 2500))
+                ]);
                 stateLoadedRef.current = true;
 
                 const lastPlaylist = await storageService.loadData<Playlist | null>('streamify_last_playlist', null);
