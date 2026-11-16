@@ -56,12 +56,28 @@ jobs:
       run: |
         echo $ENCODED_STRING | base64 -d > android/my-release-key.keystore
 
-    # 8. מקמפל את אפליקציית האנדרואיד וחותם עליה
+    # 7.5 יצירת מספור גרסה אוטומטי המבוסס על package.json וספירת הקומיטים
+    - name: Generate Shared Version Tag
+      run: |
+        COMMIT_COUNT=$(git rev-list --count HEAD)
+        BASE_VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
+        VERSION_NAME="${BASE_VERSION}.${COMMIT_COUNT}"
+        echo "COMMIT_COUNT=${COMMIT_COUNT}" >> $GITHUB_ENV
+        echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_ENV
+        echo "NEW_VERSION=v${VERSION_NAME}" >> $GITHUB_ENV
+
+    # 8. מקמפל את אפליקציית האנדרואיד עם מספור אוטומטי וחותם עליה עם ה-Keystore הקבוע
     - name: Build and Sign Release APK
       working-directory: ./android
       run: |
         chmod +x gradlew
         ./gradlew assembleRelease \
+          -PversionCode=${{ env.COMMIT_COUNT }} \
+          -PversionName=${{ env.VERSION_NAME }} \
+          -PRELEASE_STORE_FILE=my-release-key.keystore \
+          -PRELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
+          -PRELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
+          -PRELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }} \
           -Pandroid.injected.signing.storeFile=my-release-key.keystore \
           -Pandroid.injected.signing.storePassword=${{ secrets.KEYSTORE_PASSWORD }} \
           -Pandroid.injected.signing.keyAlias=${{ secrets.KEY_ALIAS }} \
@@ -73,13 +89,6 @@ jobs:
       with:
         name: streamify-app-release.apk
         path: android/app/build/outputs/apk/release/app-release.apk
-
-    # יצירת הגרסה המשותפת המבוססת על package.json וספירת הקומיטים
-    - name: Generate Shared Version Tag
-      run: |
-        COMMIT_COUNT=$(git rev-list --count HEAD)
-        BASE_VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
-        echo "NEW_VERSION=v${BASE_VERSION}.${COMMIT_COUNT}" >> $GITHUB_ENV
 
     # 10. יוצר Release חדש או מעדכן את הקיים באותו תג בדיוק כמו בווינדוס
     - name: Update Release and Overwrite Artifacts
