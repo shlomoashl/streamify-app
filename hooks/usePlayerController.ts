@@ -13,13 +13,15 @@ export const usePlayerController = (params: {
     stateLoadedRef: React.MutableRefObject<boolean>;
     setNetworkError: (msg: string | null) => void;
     onNetworkRestoredSyncLibrary: () => void;
+    onSongSkippedAutoHeal?: (songId: string) => void;
 }) => {
     const {
         currentUser,
         isAppReady,
         stateLoadedRef,
         setNetworkError,
-        onNetworkRestoredSyncLibrary
+        onNetworkRestoredSyncLibrary,
+        onSongSkippedAutoHeal
     } = params;
 
     const [playingPlaylistId, setPlayingPlaylistId] = useState<string | null>(null);
@@ -495,6 +497,7 @@ export const usePlayerController = (params: {
     };
 
     const togglePlayPause = () => {
+        autoPlayStartedRef.current = true;
         if (playerState.isPlaying) {
             audioService.pause();
             setPlayerState((p) => ({ ...p, isPlaying: false }));
@@ -536,10 +539,10 @@ export const usePlayerController = (params: {
         );
     };
 
-    const handlersRef = useRef({ handleNext, handlePrev });
+    const handlersRef = useRef({ handleNext, handlePrev, onSongSkippedAutoHeal });
     useEffect(() => {
-        handlersRef.current = { handleNext, handlePrev };
-    }, [handleNext, handlePrev]);
+        handlersRef.current = { handleNext, handlePrev, onSongSkippedAutoHeal };
+    }, [handleNext, handlePrev, onSongSkippedAutoHeal]);
 
     useEffect(() => {
         const networkListener = Network.addListener('networkStatusChange', (status) => {
@@ -664,6 +667,12 @@ export const usePlayerController = (params: {
             setTimeout(() => setNetworkError(null), 5000);
         });
 
+        const songSkippedListener = audioService.addListener('songSkipped', (data: any) => {
+            if (data?.id && handlersRef.current.onSongSkippedAutoHeal) {
+                handlersRef.current.onSongSkippedAutoHeal(data.id);
+            }
+        });
+
         if ('mediaSession' in navigator && !Capacitor.isNativePlatform()) {
             navigator.mediaSession.setActionHandler('nexttrack', () =>
                 handlersRef.current.handleNext()
@@ -677,6 +686,7 @@ export const usePlayerController = (params: {
             stateListener.remove();
             endListener.remove();
             errorListener.remove();
+            songSkippedListener.remove();
             transitionListener.remove();
             networkWaitListener.remove();
             networkRestoredListener.remove();

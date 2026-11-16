@@ -112,10 +112,14 @@ const App: React.FC = () => {
         playlistId: null
     });
 
-    // Ref to forward fetchLibrary into usePlayerController
+    // Ref to forward fetchLibrary and autoHealSkippedSong into usePlayerController
     const fetchLibraryRef = useRef<() => void>(() => {});
+    const autoHealSkippedSongRef = useRef<(songId: string) => void>(() => {});
     const onNetworkRestoredSyncLibrary = useCallback(() => {
         fetchLibraryRef.current();
+    }, []);
+    const onSongSkippedAutoHeal = useCallback((songId: string) => {
+        autoHealSkippedSongRef.current(songId);
     }, []);
 
     // 1. Player & Native Checkpoint Controller Hook
@@ -138,7 +142,8 @@ const App: React.FC = () => {
         isAppReady,
         stateLoadedRef,
         setNetworkError,
-        onNetworkRestoredSyncLibrary
+        onNetworkRestoredSyncLibrary,
+        onSongSkippedAutoHeal
     });
 
     // Forward setIsSearching ref for useLibraryManager
@@ -157,6 +162,8 @@ const App: React.FC = () => {
         setLikedSongsPlaylist,
         selectedPlaylist,
         setSelectedPlaylist,
+        streamifyCategory,
+        handleSelectStreamifyCategory,
         streamifyResults,
         setStreamifyResults,
         isLoadingStreamify,
@@ -164,6 +171,9 @@ const App: React.FC = () => {
         setStreamifyDisplayLimit,
         playlistDisplayLimit,
         setPlaylistDisplayLimit,
+        repairProgress,
+        cancelRepairPlaylist,
+        autoHealSkippedSong,
         fetchLibrary,
         loadStreamifyRecommendations,
         loadExternalPlaylist,
@@ -202,6 +212,10 @@ const App: React.FC = () => {
     useEffect(() => {
         fetchLibraryRef.current = fetchLibrary;
     }, [fetchLibrary]);
+
+    useEffect(() => {
+        autoHealSkippedSongRef.current = autoHealSkippedSong;
+    }, [autoHealSkippedSong]);
 
     // 3. Search, Voice Search & Spotify Import Hook
     const {
@@ -704,6 +718,32 @@ const App: React.FC = () => {
                     {networkError}
                 </div>
             )}
+            {repairProgress && (
+                <div className="fixed bottom-[112px] left-4 right-4 md:left-6 md:right-auto md:max-w-md bg-neutral-900/95 border border-spotify-primary/40 text-white px-4 py-2.5 rounded-xl shadow-2xl z-[75] flex items-center justify-between gap-3 backdrop-blur-md">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <LoaderIcon className="w-4 h-4 animate-spin text-spotify-primary flex-shrink-0" />
+                        <div className="text-xs truncate">
+                            <span className="font-bold text-spotify-primary">סורק ברקע: </span>
+                            <span className="font-medium">{repairProgress.playlistName}</span>
+                            <span className="text-gray-300">
+                                {' '}
+                                ({repairProgress.nextIndex}/{repairProgress.total}
+                                {repairProgress.fixedCount > 0
+                                    ? ` • תוקנו: ${repairProgress.fixedCount}`
+                                    : ''}
+                                )
+                            </span>
+                        </div>
+                    </div>
+                    <button
+                        onClick={cancelRepairPlaylist}
+                        className="text-xs text-gray-400 hover:text-red-400 font-bold px-2 py-1 rounded hover:bg-white/10 flex-shrink-0"
+                        title="עצור סריקה"
+                    >
+                        עצור
+                    </button>
+                </div>
+            )}
 
             <div className="flex flex-1 overflow-hidden relative">
                 <DesktopSidebar
@@ -763,7 +803,9 @@ const App: React.FC = () => {
 
                 <main
                     className={`flex-1 relative no-scrollbar bg-gradient-to-b from-spotify-elevated to-spotify-base ${
-                        activeTab === 'search' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'
+                        activeTab === 'search' || activeTab === 'streamify'
+                            ? 'overflow-hidden flex flex-col'
+                            : 'overflow-y-auto'
                     }`}
                 >
                     {(activeTab === 'home' || activeTab === 'library') && (
@@ -838,13 +880,15 @@ const App: React.FC = () => {
                     {activeTab === 'streamify' && (
                         <StreamifyView
                             isEncryptionEnabled={isEncryptionEnabled}
+                            activeCategory={streamifyCategory}
                             streamifyResults={streamifyResults}
                             streamifyDisplayLimit={streamifyDisplayLimit}
                             isLoadingStreamify={isLoadingStreamify}
                             playingPlaylistId={playingPlaylistId}
                             isPlaying={playerState.isPlaying}
                             observerRef={streamifyObserverTarget}
-                            onRefresh={() => loadStreamifyRecommendations(true)}
+                            onSelectCategory={handleSelectStreamifyCategory}
+                            onRefresh={() => loadStreamifyRecommendations(true, streamifyCategory)}
                             onResultClick={handleResultClick}
                             onDirectPlay={handleDirectPlay}
                         />

@@ -189,6 +189,86 @@ export const fetchYouTubeBrowseApi = async (
 };
 
 /**
+ * קריאת פלייליסטים מובילים ומסוננים לפי ז'אנר בעמוד Streamify (דמוי YouTube Music Explore)
+ */
+export const fetchStreamifyExploreApi = async (
+    apiBaseUrl: string,
+    category: string,
+    encryptionEnabled: boolean,
+    forceRefresh: boolean = false
+): Promise<any> => {
+    const cleanBase = apiBaseUrl.replace(/\/$/, '');
+    const params = new URLSearchParams({
+        category,
+        refresh: forceRefresh ? '1' : '0',
+        use_underscore: encryptionEnabled ? 'true' : 'false',
+        enc: encryptionEnabled ? '1' : '0'
+    });
+
+    const res = await fetch(`${cleanBase}/streamify-explore?${params.toString()}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return encryptionEnabled ? decryptServerResponseIfNeeded(data, true) : data;
+};
+
+/**
+ * בדיקה מהירה בקבוצות (Batch) אילו מזהי שירים באמת נמחקו מיוטיוב
+ */
+export const checkVideosBatchApi = async (
+    apiBaseUrl: string,
+    ids: string[]
+): Promise<{ success: boolean; existence: Record<string, boolean>; deletedIds: string[] }> => {
+    const cleanBase = apiBaseUrl.replace(/\/$/, '');
+    const res = await fetch(`${cleanBase}/check-videos-batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+};
+
+/**
+ * אימות האם שיר באמת נמחק מיוטיוב ומציאת שיר חלופי רק במקרה שנמחק באמת
+ */
+export const verifyAndFindReplacementApi = async (
+    apiBaseUrl: string,
+    song: { id: string; title: string; author: string },
+    encryptionEnabled: boolean,
+    forceReplace: boolean = false
+): Promise<{
+    success: boolean;
+    needsReplacement: boolean;
+    replacement?: YouTubeSearchResult;
+    reason?: string;
+}> => {
+    const cleanBase = apiBaseUrl.replace(/\/$/, '');
+    const params = new URLSearchParams({
+        use_underscore: encryptionEnabled ? 'true' : 'false',
+        enc: encryptionEnabled ? '1' : '0'
+    });
+
+    const payload = {
+        id: song.id,
+        title: encryptionEnabled ? encryptText(song.title) : song.title,
+        author: encryptionEnabled ? encryptText(song.author || '') : song.author || '',
+        forceReplace
+    };
+
+    const res = await fetch(`${cleanBase}/verify-and-find-replacement?${params.toString()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data && data.replacement && (encryptionEnabled || data.encrypted)) {
+        data.replacement = decryptSearchResultItem(data.replacement);
+    }
+    return data;
+};
+
+/**
  * הורדה ופענוח של תמונה מוצפנת (XOR 0x77) מהשרת והמרתה ל-Blob URL מקומי
  */
 export const fetchEncryptedImageBlobUrl = async (

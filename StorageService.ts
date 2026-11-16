@@ -20,7 +20,8 @@ export class StorageService {
             'streamify_last_playlist': 'last_playlist.json',
             'streamify_playlist_view_mode': 'settings_view.json',
             'streamify_search_history': 'search_history.json',
-            'streamify_encryption_enabled': 'encryption_settings.json'
+            'streamify_encryption_enabled': 'encryption_settings.json',
+            'streamify_repair_job': 'repair_job.json'
         };
         return mapping[key] || `${key}.json`;
     }

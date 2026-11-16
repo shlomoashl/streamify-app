@@ -20,6 +20,7 @@ import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
+import androidx.media3.common.ForwardingPlayer;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.MimeTypes;
@@ -165,6 +166,10 @@ public class PlaybackService extends MediaSessionService {
         if (paused) {
             this.waitingForNetwork = false;
             retryHandler.removeCallbacksAndMessages(null);
+            if (player != null) {
+                player.setPlayWhenReady(false);
+                player.pause();
+            }
             saveCurrentPositionSafely(true);
         } else {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -221,7 +226,35 @@ public class PlaybackService extends MediaSessionService {
 
         setupPlayerListeners();
 
-        mediaSession = new MediaSession.Builder(this, player).build();
+        // עטיפת הנגן ב-ForwardingPlayer שחוסם לחלוטין פקודות Play אוטומטיות ממערכת האנדרואיד/רכב
+        // כאשר הלקוח לחץ על Pause (userPaused == true)
+        ForwardingPlayer guardedSessionPlayer = new ForwardingPlayer(player) {
+            @Override
+            public void play() {
+                if (userPaused) {
+                    Log.w(TAG, "Blocked external MediaSession play() because userPaused=true");
+                    super.setPlayWhenReady(false);
+                    super.pause();
+                    PluginEvents.postEvent("playbackState", false);
+                    return;
+                }
+                super.play();
+            }
+
+            @Override
+            public void setPlayWhenReady(boolean playWhenReady) {
+                if (playWhenReady && userPaused) {
+                    Log.w(TAG, "Blocked external MediaSession setPlayWhenReady(true) because userPaused=true");
+                    super.setPlayWhenReady(false);
+                    super.pause();
+                    PluginEvents.postEvent("playbackState", false);
+                    return;
+                }
+                super.setPlayWhenReady(playWhenReady);
+            }
+        };
+
+        mediaSession = new MediaSession.Builder(this, guardedSessionPlayer).build();
         restoreLastPlayedState();
         mainHandler.post(saveRunnable);
     }
@@ -581,13 +614,21 @@ public class PlaybackService extends MediaSessionService {
 
             @Override
             public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
+                // חוק ברזל: אם הלקוח במצב Pause, שום אירוע חיצוני (כמו פתיחת Google/הגדרות או AudioFocus)
+                // לא יכול להדליק את הנגן מעצמו!
+                if (playWhenReady && userPaused) {
+                    Log.w(TAG, "Blocking unexpected playWhenReady=true (reason=" + reason + ") because userPaused=true");
+                    player.setPlayWhenReady(false);
+                    player.pause();
+                    PluginEvents.postEvent("playbackState", false);
+                    return;
+                }
+
                 if (!playWhenReady && (
                         reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST ||
-                        reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY ||
-                        reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)) {
+                        reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY)) {
                     setUserPaused(true);
                 } else if (playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
-                    setUserPaused(false);
                     markBootAutoPlayHandled();
                 }
             }

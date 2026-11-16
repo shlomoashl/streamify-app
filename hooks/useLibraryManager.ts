@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
     Folder,
     LibraryData,
@@ -11,13 +11,29 @@ import {
 import { LIBRARY_API_BASE, YOUTUBE_API_BASE } from '../constants';
 import { storageService } from '../StorageService';
 import { STREAMIFY_KEYWORDS, searchResultToPlaylistItem } from '../utils/mediaUtils';
-import { fetchYouTubeBrowseApi, fetchYouTubeSearchApi } from '../utils/encryptionUtils';
+import {
+    checkVideosBatchApi,
+    fetchStreamifyExploreApi,
+    fetchYouTubeBrowseApi,
+    fetchYouTubeSearchApi,
+    verifyAndFindReplacementApi
+} from '../utils/encryptionUtils';
 import {
     BulkImportModalState,
     ConfirmModalState,
     ManageUsersModalState,
     MoveToFolderModalState
 } from '../components/Modals';
+import { StreamifyCategory } from '../components/views/StreamifyView';
+
+export interface RepairJobCheckpoint {
+    playlistId: string;
+    playlistName: string;
+    nextIndex: number;
+    total: number;
+    fixedCount: number;
+    updatedAt: number;
+}
 
 export const useLibraryManager = (params: {
     isEncryptionEnabled: boolean;
@@ -60,10 +76,25 @@ export const useLibraryManager = (params: {
     const [folders, setFolders] = useState<Folder[]>([]);
     const [likedSongsPlaylist, setLikedSongsPlaylist] = useState<Playlist | null>(null);
     const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+    const [streamifyCategory, setStreamifyCategory] = useState<StreamifyCategory>('all');
     const [streamifyResults, setStreamifyResults] = useState<YouTubeSearchResult[]>([]);
     const [isLoadingStreamify, setIsLoadingStreamify] = useState(false);
     const [streamifyDisplayLimit, setStreamifyDisplayLimit] = useState(20);
     const [playlistDisplayLimit, setPlaylistDisplayLimit] = useState(30);
+    const [repairProgress, setRepairProgress] = useState<RepairJobCheckpoint | null>(null);
+
+    const streamifyCategoryCacheRef = useRef<Map<StreamifyCategory, YouTubeSearchResult[]>>(
+        new Map()
+    );
+    const playlistsRef = useRef<Playlist[]>(playlists);
+    useEffect(() => {
+        playlistsRef.current = playlists;
+    }, [playlists]);
+
+    const repairRunningRef = useRef(false);
+    const repairCancelledRef = useRef(false);
+    const autoRetryResumedRef = useRef(false);
+    const autoHealedInSessionRef = useRef<Set<string>>(new Set());
 
     const updatePlaylistsLocally = useCallback(
         (newPlaylists: Playlist[]) => {
@@ -149,53 +180,143 @@ export const useLibraryManager = (params: {
         if (currentUser) fetchLibrary();
     }, [currentUser, fetchLibrary]);
 
-    const loadStreamifyRecommendations = async (forceRefresh = false) => {
-        if (!forceRefresh && streamifyResults.length > 0) return;
-
-        setIsLoadingStreamify(true);
-        setStreamifyDisplayLimit(20);
-
-        try {
-            const fetchPromises = STREAMIFY_KEYWORDS.map(async (kw) => {
-                const data = await fetchYouTubeSearchApi(
-                    YOUTUBE_API_BASE,
-                    kw,
-                    'youtubemusic_playlists',
-                    isEncryptionEnabled
-                );
-
-                if (data.success && data.results) {
-                    const topResults = data.results
-                        .slice(0, 15)
-                        .filter((r: any) => r.id && r.title);
-                    for (let i = topResults.length - 1; i > 0; i--) {
-                        const j = Math.floor(Math.random() * (i + 1));
-                        [topResults[i], topResults[j]] = [topResults[j], topResults[i]];
-                    }
-                    return topResults.slice(0, 5);
-                }
-                return [];
-            });
-
-            const resultsArrays = await Promise.all(fetchPromises);
-            const allResults = resultsArrays.flat();
-            const uniqueResults = Array.from(
-                new Map(allResults.map((item) => [item.id, item])).values()
-            );
-
-            for (let i = uniqueResults.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [uniqueResults[i], uniqueResults[j]] = [uniqueResults[j], uniqueResults[i]];
+    const loadStreamifyRecommendations = useCallback(
+        async (forceRefresh = false, targetCategory?: StreamifyCategory) => {
+            const cat = targetCategory || streamifyCategory;
+            const cachedCat = streamifyCategoryCacheRef.current.get(cat);
+            if (!forceRefresh && cachedCat && cachedCat.length > 0) {
+                setStreamifyResults(cachedCat);
+                return;
             }
 
-            setStreamifyResults(uniqueResults as YouTubeSearchResult[]);
-            storageService.saveData('streamify_recommended', uniqueResults);
-        } catch (e) {
-            console.error('Failed to load streamify recommendations', e);
-        } finally {
-            setIsLoadingStreamify(false);
-        }
-    };
+            setIsLoadingStreamify(true);
+            setStreamifyDisplayLimit(24);
+
+            try {
+                // 1. ניסיון ראשי: ראוט ה-Explore החדש שמסנן רק פלייליסטים גדולים ומובילים מ-YouTube Music
+                try {
+                    const exploreData = await fetchStreamifyExploreApi(
+                        YOUTUBE_API_BASE,
+                        cat,
+                        isEncryptionEnabled,
+                        forceRefresh
+                    );
+                    if (
+                        exploreData &&
+                        exploreData.success &&
+                        Array.isArray(exploreData.results) &&
+                        exploreData.results.length > 0
+                    ) {
+                        streamifyCategoryCacheRef.current.set(cat, exploreData.results);
+                        setStreamifyResults(exploreData.results);
+                        if (cat === 'all') {
+                            storageService.saveData('streamify_recommended', exploreData.results);
+                        }
+                        return;
+                    }
+                } catch (exploreErr) {
+                    console.warn(
+                        'streamify-explore fallback to filtered search:',
+                        exploreErr
+                    );
+                }
+
+                // 2. גיבוי עם סינון איכות קשיח (>= 15 שירים) במקרה שהשרת טרם עודכן
+                const categoryQueries: Record<StreamifyCategory, string[]> = {
+                    all: STREAMIFY_KEYWORDS.slice(0, 10),
+                    chasidic: [
+                        'להיטים חסידיים גדולים',
+                        'מוזיקה חסידית חדשה',
+                        'פלייליסט חסידי מקפיץ',
+                        'אברהם פריד מיטב השירים',
+                        'שמוליק סוכות ארי היל'
+                    ],
+                    religious_israeli: [
+                        'מוזיקה יהודית מתחדשת',
+                        'ישי ריבו חנן בן ארי עקיבא',
+                        'שירים דתיים מומלצים',
+                        'פלייליסט יהודי ישראלי'
+                    ],
+                    global_hits: [
+                        'Global Top Hits Playlist',
+                        'Biggest Pop Hits Playlist',
+                        'Best International Hits Playlist'
+                    ],
+                    instrumental: [
+                        'Instrumental Relaxing Piano & Violin',
+                        'Epic Cinematic Soundtrack Playlist',
+                        'ניגונים ללא מילים מרגיע'
+                    ],
+                    chill_focus: [
+                        'Chill Relaxing Music Playlist',
+                        'Acoustic Chill Hits',
+                        'שירים שקטים ומרגיעים'
+                    ],
+                    energetic: [
+                        'Upbeat Driving Music Playlist',
+                        'פלייליסט מקפיץ לנסיעה',
+                        'Workout & High Energy Hits'
+                    ],
+                    world_ethnic: [
+                        'World Music Best Playlists',
+                        'Mediterranean & Acoustic World Hits',
+                        'מוזיקת עולם אתנית'
+                    ]
+                };
+
+                const queries = categoryQueries[cat] || categoryQueries.all;
+                const fetchPromises = queries.map(async (kw) => {
+                    const data = await fetchYouTubeSearchApi(
+                        YOUTUBE_API_BASE,
+                        kw,
+                        'youtubemusic_playlists',
+                        isEncryptionEnabled
+                    );
+
+                    if (data.success && data.results) {
+                        return data.results.filter((r: any) => {
+                            if (!r.id || !r.title) return false;
+                            const isOfficial =
+                                String(r.id).toLowerCase().includes('rdclak5uy_') ||
+                                String(r.author || '')
+                                    .toLowerCase()
+                                    .includes('youtube music');
+                            if (isOfficial) return true;
+                            const countMatch = String(r.itemCount || '').match(/(\d+)/);
+                            const count = countMatch ? parseInt(countMatch[1], 10) : 20;
+                            return count >= 15;
+                        });
+                    }
+                    return [];
+                });
+
+                const resultsArrays = await Promise.all(fetchPromises);
+                const allResults = resultsArrays.flat();
+                const uniqueResults = Array.from(
+                    new Map(allResults.map((item) => [item.id, item])).values()
+                ) as YouTubeSearchResult[];
+
+                streamifyCategoryCacheRef.current.set(cat, uniqueResults);
+                setStreamifyResults(uniqueResults);
+                if (cat === 'all') {
+                    storageService.saveData('streamify_recommended', uniqueResults);
+                }
+            } catch (e) {
+                console.error('Failed to load streamify recommendations', e);
+            } finally {
+                setIsLoadingStreamify(false);
+            }
+        },
+        [isEncryptionEnabled, streamifyCategory]
+    );
+
+    const handleSelectStreamifyCategory = useCallback(
+        (cat: StreamifyCategory) => {
+            setStreamifyCategory(cat);
+            loadStreamifyRecommendations(false, cat);
+        },
+        [loadStreamifyRecommendations]
+    );
 
     const loadExternalPlaylist = useCallback(
         async (playlist: Playlist) => {
@@ -722,6 +843,294 @@ export const useLibraryManager = (params: {
         }
     };
 
+    // החלפה שקטה של שיר בפלייליסט (בלי חלון טעינה חוסם) עבור תיקון ברקע ו-Auto-Heal
+    const silentReplaceSongInPlaylist = useCallback(
+        async (playlistId: string, oldSongId: string, newSongItem: PlaylistItem) => {
+            if (!currentUser) return false;
+            try {
+                const currentList = playlistsRef.current;
+                const updated = currentList.map((p) => {
+                    if (p.id !== playlistId) return p;
+                    const alreadyHasNew = p.songs.some((s) => s.id === newSongItem.id);
+                    const replacedSongs = p.songs
+                        .map((s) => (s.id === oldSongId ? newSongItem : s))
+                        .filter((s, idx, arr) =>
+                            alreadyHasNew ? arr.findIndex((x) => x.id === s.id) === idx : true
+                        );
+                    return { ...p, songs: replacedSongs };
+                });
+
+                updatePlaylistsLocally(updated);
+
+                await fetch(`${LIBRARY_API_BASE}/songs/remove`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ playlistId, songId: oldSongId })
+                });
+
+                await fetch(`${LIBRARY_API_BASE}/songs/add`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        playlistId,
+                        songs: [newSongItem],
+                        userEmail: currentUser.email
+                    })
+                });
+
+                return true;
+            } catch (e) {
+                console.warn('Silent song replacement failed:', e);
+                return false;
+            }
+        },
+        [currentUser, updatePlaylistsLocally]
+    );
+
+    // תיקון אוטומטי שקוף ברקע (Auto-Heal) כאשר הנגן מדלג על שיר תקול:
+    // הנגן מדלג מיד לשיר הבא בלי לעכב את המשתמש, וברקע אנחנו מוודאים מול יוטיוב אם השיר באמת נמחק
+    // (ולא סתם שגיאת בוט/קוקיז/רשת). רק אם נמחק באמת - מעדכנים את ה-ID לפעם הבאה!
+    const autoHealSkippedSong = useCallback(
+        async (skippedSongId: string) => {
+            if (!skippedSongId || !currentUser) return;
+            if (autoHealedInSessionRef.current.has(skippedSongId)) return;
+            autoHealedInSessionRef.current.add(skippedSongId);
+
+            const affectedPlaylists = playlistsRef.current.filter(
+                (p) =>
+                    !p.id.startsWith('temp-') &&
+                    !p.externalId &&
+                    p.songs.some((s) => s.id === skippedSongId)
+            );
+            if (affectedPlaylists.length === 0) return;
+
+            const sampleSong = affectedPlaylists[0].songs.find((s) => s.id === skippedSongId);
+            if (!sampleSong || !sampleSong.title) return;
+
+            try {
+                const res = await verifyAndFindReplacementApi(
+                    YOUTUBE_API_BASE,
+                    {
+                        id: sampleSong.id,
+                        title: sampleSong.title,
+                        author: sampleSong.author || ''
+                    },
+                    isEncryptionEnabled,
+                    false // חובה לבדוק מול YouTube API v3 שהשיר באמת נמחק ולא סתם חסימת בוט!
+                );
+
+                if (res.success && res.needsReplacement && res.replacement && res.replacement.id) {
+                    const replacementId = res.replacement.id;
+                    if (replacementId !== skippedSongId) {
+                        console.log(
+                            `[Auto-Heal] Song "${sampleSong.title}" (${skippedSongId}) confirmed deleted on YouTube. Updating ID to ${replacementId} for next time.`
+                        );
+                        for (const pl of affectedPlaylists) {
+                            const oldItem = pl.songs.find((s) => s.id === skippedSongId);
+                            if (oldItem) {
+                                const newSongItem: PlaylistItem = {
+                                    ...oldItem,
+                                    id: replacementId,
+                                    thumbnail:
+                                        res.replacement.thumbnail_url || oldItem.thumbnail,
+                                    addedAt: new Date().toISOString()
+                                };
+                                await silentReplaceSongInPlaylist(
+                                    pl.id,
+                                    skippedSongId,
+                                    newSongItem
+                                );
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('[Auto-Heal] Verification skipped due to network/server error:', e);
+            }
+        },
+        [currentUser, isEncryptionEnabled, silentReplaceSongInPlaylist]
+    );
+
+    // מנוע סריקה ותיקון פלייליסטים חכם ברקע עם שמירת מיקום (Checkpoint) ובדיקת Batch מהירה
+    const runBackgroundPlaylistRepair = useCallback(
+        async (
+            playlist: Playlist,
+            startIndex: number = 0,
+            initialFixedCount: number = 0
+        ) => {
+            if (repairRunningRef.current) return;
+            const songsSnapshot = [...playlist.songs];
+            const total = songsSnapshot.length;
+            if (total === 0 || startIndex >= total) {
+                await storageService.saveData('streamify_repair_job', null);
+                setRepairProgress(null);
+                return;
+            }
+
+            repairRunningRef.current = true;
+            repairCancelledRef.current = false;
+            let fixedCount = initialFixedCount;
+            const BATCH_SIZE = 25;
+
+            try {
+                for (let batchStart = startIndex; batchStart < total; batchStart += BATCH_SIZE) {
+                    if (repairCancelledRef.current) break;
+
+                    const batchEnd = Math.min(batchStart + BATCH_SIZE, total);
+                    const batchSongs = songsSnapshot.slice(batchStart, batchEnd);
+                    const batchIds = batchSongs.map((s) => s.id).filter(Boolean);
+
+                    // שלב א': בדיקת קיום מהירה בבקשה אחת לכל הקבוצה (25 שירים ב-0.2 שניות!)
+                    let deletedSet: Set<string> | null = null;
+                    try {
+                        const batchCheck = await checkVideosBatchApi(
+                            YOUTUBE_API_BASE,
+                            batchIds
+                        );
+                        if (batchCheck && batchCheck.success && Array.isArray(batchCheck.deletedIds)) {
+                            deletedSet = new Set(batchCheck.deletedIds);
+                        }
+                    } catch {
+                        deletedSet = null;
+                    }
+
+                    // שלב ב': עוברים על השירים בקבוצה - שירים תקינים מדולגים מיידית ב-0 השהיה!
+                    for (let offset = 0; offset < batchSongs.length; offset++) {
+                        if (repairCancelledRef.current) break;
+
+                        const currentIdx = batchStart + offset;
+                        const song = batchSongs[offset];
+
+                        const checkpoint: RepairJobCheckpoint = {
+                            playlistId: playlist.id,
+                            playlistName: playlist.name,
+                            nextIndex: currentIdx + 1,
+                            total,
+                            fixedCount,
+                            updatedAt: Date.now()
+                        };
+                        setRepairProgress(checkpoint);
+                        await storageService.saveData('streamify_repair_job', checkpoint);
+
+                        // אם בדיקת ה-Batch אישרה שהשיר חי וקיים ביוטיוב - לא נוגעים בו ולא מבזבזים זמן!
+                        if (deletedSet !== null && !deletedSet.has(song.id)) {
+                            continue;
+                        }
+
+                        // השיר זוהה כמחוק/חסום (או שאין Batch API): נבצע אימות וחיפוש חלופה בקצב בטוח
+                        try {
+                            const rep = await verifyAndFindReplacementApi(
+                                YOUTUBE_API_BASE,
+                                {
+                                    id: song.id,
+                                    title: song.title,
+                                    author: song.author || ''
+                                },
+                                isEncryptionEnabled,
+                                deletedSet !== null && deletedSet.has(song.id)
+                            );
+
+                            if (
+                                rep.success &&
+                                rep.needsReplacement &&
+                                rep.replacement &&
+                                rep.replacement.id &&
+                                rep.replacement.id !== song.id
+                            ) {
+                                const newSongItem: PlaylistItem = {
+                                    ...song,
+                                    id: rep.replacement.id,
+                                    thumbnail:
+                                        rep.replacement.thumbnail_url || song.thumbnail,
+                                    addedAt: new Date().toISOString()
+                                };
+                                const ok = await silentReplaceSongInPlaylist(
+                                    playlist.id,
+                                    song.id,
+                                    newSongItem
+                                );
+                                if (ok) {
+                                    fixedCount++;
+                                    const updatedCp: RepairJobCheckpoint = {
+                                        ...checkpoint,
+                                        fixedCount
+                                    };
+                                    setRepairProgress(updatedCp);
+                                    await storageService.saveData(
+                                        'streamify_repair_job',
+                                        updatedCp
+                                    );
+                                }
+                            }
+                        } catch (err) {
+                            console.warn(`Error repairing song "${song.title}":`, err);
+                        }
+
+                        // המתנה מאובטחת של 1.5 שניות רק אחרי חיפוש בפועל כדי לעולם לא להיחסם
+                        await new Promise((r) => setTimeout(r, 1500));
+                    }
+                }
+
+                if (!repairCancelledRef.current) {
+                    await storageService.saveData('streamify_repair_job', null);
+                    setRepairProgress(null);
+                    setConfirmModal({
+                        isOpen: true,
+                        title: 'סריקת הפלייליסט הושלמה',
+                        message:
+                            fixedCount > 0
+                                ? `הסריקה של "${playlist.name}" הסתיימה בהצלחה! נמצאו ותוקנו ${fixedCount} שירים שנמחקו מיוטיוב.`
+                                : `הסריקה של "${playlist.name}" הסתיימה! כל ${total} השירים בפלייליסט תקינים ופעילים.`,
+                        onConfirm: () => setConfirmModal((p) => ({ ...p, isOpen: false })),
+                        isAlertOnly: true
+                    });
+                }
+            } finally {
+                repairRunningRef.current = false;
+            }
+        },
+        [isEncryptionEnabled, setConfirmModal, silentReplaceSongInPlaylist]
+    );
+
+    const cancelRepairPlaylist = useCallback(async () => {
+        repairCancelledRef.current = true;
+        repairRunningRef.current = false;
+        setRepairProgress(null);
+        await storageService.saveData('streamify_repair_job', null);
+    }, []);
+
+    // המשך אוטומטי של סריקה/תיקון פלייליסט ברקע אם האפליקציה נסגרה באמצע בפעם הקודמת
+    useEffect(() => {
+        if (!currentUser || playlists.length === 0 || autoRetryResumedRef.current) return;
+        autoRetryResumedRef.current = true;
+
+        storageService
+            .loadData<RepairJobCheckpoint | null>('streamify_repair_job', null)
+            .then((savedJob) => {
+                if (
+                    savedJob &&
+                    savedJob.playlistId &&
+                    typeof savedJob.nextIndex === 'number' &&
+                    savedJob.nextIndex < savedJob.total
+                ) {
+                    const targetPl = playlists.find((p) => p.id === savedJob.playlistId);
+                    if (targetPl && targetPl.songs.length > savedJob.nextIndex) {
+                        console.log(
+                            `[Repair] Resuming background playlist repair for "${targetPl.name}" from song ${savedJob.nextIndex + 1}/${targetPl.songs.length}`
+                        );
+                        runBackgroundPlaylistRepair(
+                            targetPl,
+                            savedJob.nextIndex,
+                            savedJob.fixedCount || 0
+                        );
+                    } else {
+                        storageService.saveData('streamify_repair_job', null);
+                    }
+                }
+            })
+            .catch(() => {});
+    }, [currentUser, playlists, runBackgroundPlaylistRepair]);
+
     const repairPlaylistSongs = async (playlist: Playlist) => {
         const songsToFix = playlist.songs;
         if (songsToFix.length === 0) {
@@ -729,58 +1138,40 @@ export const useLibraryManager = (params: {
             return;
         }
 
+        if (repairRunningRef.current) {
+            setConfirmModal({
+                isOpen: true,
+                title: 'סריקה כבר פעילה ברקע',
+                message: 'כרגע מתבצעת סריקה ותיקון של פלייליסט ברקע. המתן לסיומה או בטל אותה מהפס התחתון.',
+                onConfirm: () => setConfirmModal((prev) => ({ ...prev, isOpen: false })),
+                isAlertOnly: true
+            });
+            return;
+        }
+
+        const savedJob = await storageService.loadData<RepairJobCheckpoint | null>(
+            'streamify_repair_job',
+            null
+        );
+        const canResume =
+            savedJob &&
+            savedJob.playlistId === playlist.id &&
+            savedJob.nextIndex > 0 &&
+            savedJob.nextIndex < songsToFix.length;
+
         setConfirmModal({
             isOpen: true,
-            title: 'תיקון ועדכון שירים',
-            message: `נמצאו ${songsToFix.length} שירים בפלייליסט. האפליקציה תסרוק ותחפש להם קישורים חדשים ותעדכן את ה-ID שלהם. פעולה זו עשויה לקחת קצת זמן. להמשיך?`,
+            title: 'סריקה ותיקון חכם ברקע',
+            message: canResume
+                ? `נמצאה סריקה קודמת של "${playlist.name}" שעצרה בשיר ${savedJob.nextIndex} מתוך ${songsToFix.length}. הסריקה תמשיך כעת ברקע (ללא חסימת האפליקציה) ותחליף אך ורק שירים שבאמת נמחקו מיוטיוב. להמשיך?`
+                : `האפליקציה תסרוק ברקע ${songsToFix.length} שירים בפלייליסט "${playlist.name}". רק שירים שבאמת נמחקו מיוטיוב יוחלפו במזהה חדש, והמיקום יישמר אוטומטית גם אם תצא מהאפליקציה. להתחיל?`,
             onConfirm: async () => {
                 setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-                setGlobalLoading('מתחיל סריקה ועדכון...');
-                let successCount = 0;
-
-                for (let i = 0; i < songsToFix.length; i++) {
-                    const oldSong = songsToFix[i];
-                    setGlobalLoading(
-                        `מעדכן: ${oldSong.title} (${i + 1}/${songsToFix.length})`
-                    );
-
-                    try {
-                        const data = await fetchYouTubeSearchApi(
-                            YOUTUBE_API_BASE,
-                            `${oldSong.title} ${oldSong.author} audio`,
-                            'youtubemusic_songs',
-                            isEncryptionEnabled
-                        );
-
-                        if (data.success && data.results && data.results.length > 0) {
-                            const bestMatch = data.results[0];
-                            if (bestMatch.id !== oldSong.id) {
-                                await apiRemoveSong(playlist.id, oldSong.id);
-                                const newSongItem: PlaylistItem = {
-                                    ...oldSong,
-                                    id: bestMatch.id,
-                                    thumbnail: bestMatch.thumbnail_url || oldSong.thumbnail,
-                                    addedAt: new Date().toISOString()
-                                };
-                                await apiAddSongsToPlaylist(playlist.id, [newSongItem]);
-                                successCount++;
-                            }
-                        }
-                    } catch (e) {
-                        console.error(`שגיאה בעדכון השיר ${oldSong.title}:`, e);
-                    }
-
-                    await new Promise((resolve) => setTimeout(resolve, 600));
-                }
-
-                setGlobalLoading(null);
-                setConfirmModal({
-                    isOpen: true,
-                    title: 'הסריקה הסתיימה',
-                    message: `מתוך ${songsToFix.length} שירים, ${successCount} קיבלו מזהה (ID) חדש ועודכנו בהצלחה.`,
-                    onConfirm: () => setConfirmModal((prev) => ({ ...prev, isOpen: false })),
-                    isAlertOnly: true
-                });
+                runBackgroundPlaylistRepair(
+                    playlist,
+                    canResume ? savedJob!.nextIndex : 0,
+                    canResume ? savedJob!.fixedCount : 0
+                );
             }
         });
     };
@@ -808,6 +1199,8 @@ export const useLibraryManager = (params: {
         setLikedSongsPlaylist,
         selectedPlaylist,
         setSelectedPlaylist,
+        streamifyCategory,
+        handleSelectStreamifyCategory,
         streamifyResults,
         setStreamifyResults,
         isLoadingStreamify,
@@ -815,6 +1208,9 @@ export const useLibraryManager = (params: {
         setStreamifyDisplayLimit,
         playlistDisplayLimit,
         setPlaylistDisplayLimit,
+        repairProgress,
+        cancelRepairPlaylist,
+        autoHealSkippedSong,
         fetchLibrary,
         loadStreamifyRecommendations,
         loadExternalPlaylist,
