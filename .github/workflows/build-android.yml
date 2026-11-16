@@ -55,6 +55,7 @@ jobs:
         ENCODED_STRING: ${{ secrets.KEYSTORE_BASE64 }}
       run: |
         echo $ENCODED_STRING | base64 -d > android/my-release-key.keystore
+        cp android/my-release-key.keystore android/app/my-release-key.keystore
 
     # 7.5 יצירת מספור גרסה אוטומטי המבוסס על package.json וספירת הקומיטים
     - name: Generate Shared Version Tag
