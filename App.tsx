@@ -64,6 +64,7 @@ const App: React.FC = () => {
     const [isEncryptionEnabled, setIsEncryptionEnabled] = useState<boolean>(() =>
         getInitialEncryptionEnabled()
     );
+    const [playingPlaylistTitle, setPlayingPlaylistTitle] = useState<string | null>(null);
     const stateLoadedRef = useRef(false);
 
     useEffect(() => {
@@ -481,6 +482,7 @@ const App: React.FC = () => {
             return;
         }
         if (playlist.songs.length > 0) {
+            setPlayingPlaylistTitle(playlist.name);
             const startIdx = playerState.isShuffled ? Math.floor(Math.random() * playlist.songs.length) : 0;
             handlePlaySong(playlist.songs[startIdx], playlist.songs, startIdx, true, playlist.id);
         }
@@ -494,7 +496,10 @@ const App: React.FC = () => {
                 .filter((r) => !r.type || r.type === 'song' || r.type === 'video')
                 .map((r) => searchResultToPlaylistItem(r, 'search'));
             const clickedIdx = songQueue.findIndex((s) => s.id === result.id);
-            if (clickedIdx !== -1) handlePlaySong(songQueue[clickedIdx], songQueue, clickedIdx, false, 'temp-search');
+            if (clickedIdx !== -1) {
+                setPlayingPlaylistTitle('תוצאות חיפוש');
+                handlePlaySong(songQueue[clickedIdx], songQueue, clickedIdx, false, 'temp-search');
+            }
             return;
         }
         if (result.type === 'spotify_playlist') return handleSpotifyImport(result.id);
@@ -544,7 +549,10 @@ const App: React.FC = () => {
                 .filter((r) => !r.type || r.type === 'song' || r.type === 'video')
                 .map((r) => searchResultToPlaylistItem(r, 'search'));
             const clickedIdx = songQueue.findIndex((s) => s.id === result.id);
-            if (clickedIdx !== -1) handlePlaySong(songQueue[clickedIdx], songQueue, clickedIdx, false, 'temp-search');
+            if (clickedIdx !== -1) {
+                setPlayingPlaylistTitle('תוצאות חיפוש');
+                handlePlaySong(songQueue[clickedIdx], songQueue, clickedIdx, false, 'temp-search');
+            }
             return;
         }
         if (result.type === 'spotify_playlist') return handleSpotifyImport(result.id);
@@ -560,6 +568,7 @@ const App: React.FC = () => {
             if (data.success && data.results && data.results.length > 0) {
                 const tracks = data.results.map((r: any) => searchResultToPlaylistItem(r, 'temp'));
                 const tempId = `temp-${result.id}`;
+                setPlayingPlaylistTitle(result.title || 'פלייליסט');
                 const startIdx = playerState.isShuffled ? Math.floor(Math.random() * tracks.length) : 0;
                 handlePlaySong(tracks[startIdx], tracks, startIdx, true, tempId);
             }
@@ -964,12 +973,91 @@ const App: React.FC = () => {
             <Player
                 playerState={playerState}
                 initialTime={initialSavedTime}
+                isEncryptionEnabled={isEncryptionEnabled}
+                sourcePlaylistName={(() => {
+                    if (!playingPlaylistId) {
+                        return playerState.queue.length > 0 ? 'תור ההשמעה הנוכחי' : null;
+                    }
+                    const savedPl = playlists.find((p) => p.id === playingPlaylistId);
+                    if (savedPl) return savedPl.name;
+                    if (playingPlaylistTitle) return playingPlaylistTitle;
+                    if (selectedPlaylist && selectedPlaylist.id === playingPlaylistId) {
+                        return selectedPlaylist.name;
+                    }
+                    if (playingPlaylistId === 'temp-search') return 'תוצאות חיפוש';
+                    if (playingPlaylistId.startsWith('temp-')) {
+                        const rawId = playingPlaylistId.replace('temp-', '');
+                        const found =
+                            streamifyResults.find((r) => r.id === rawId) ||
+                            searchResults.find((r) => r.id === rawId);
+                        if (found?.title) return found.title;
+                        return 'פלייליסט חיצוני';
+                    }
+                    return 'תור ההשמעה הנוכחי';
+                })()}
+                canGoToPlaylist={Boolean(playingPlaylistId || playerState.queue.length > 0)}
+                isCurrentSongLiked={Boolean(
+                    playerState.currentSong &&
+                        likedSongsPlaylist?.songs.some((s) => s.id === playerState.currentSong!.id)
+                )}
+                canRemoveCurrentSong={Boolean(
+                    playerState.currentSong &&
+                        playingPlaylistId &&
+                        !playingPlaylistId.startsWith('temp-')
+                )}
                 onPlayPause={togglePlayPause}
                 onNext={handleNext}
                 onPrev={handlePrev}
                 onShuffle={toggleShuffle}
                 onToggleExpand={() => setPlayerState((p) => ({ ...p, isExpanded: !p.isExpanded }))}
                 onSeek={handleSeek}
+                onGoToPlaylist={() => {
+                    if (playingPlaylistId) {
+                        const savedPl = playlists.find((p) => p.id === playingPlaylistId);
+                        if (savedPl) {
+                            setSelectedPlaylist(savedPl);
+                            setActiveTab('playlist');
+                            return;
+                        }
+                        if (selectedPlaylist && selectedPlaylist.id === playingPlaylistId) {
+                            setActiveTab('playlist');
+                            return;
+                        }
+                    }
+
+                    if (playerState.queue && playerState.queue.length > 0) {
+                        const rawId = playingPlaylistId?.startsWith('temp-')
+                            ? playingPlaylistId.replace('temp-', '')
+                            : '';
+                        const matchedMeta = rawId
+                            ? streamifyResults.find((r) => r.id === rawId) ||
+                              searchResults.find((r) => r.id === rawId)
+                            : undefined;
+                        setSelectedPlaylist({
+                            id: playingPlaylistId || 'temp-queue',
+                            name:
+                                playingPlaylistTitle ||
+                                matchedMeta?.title ||
+                                (playingPlaylistId === 'temp-search'
+                                    ? 'תוצאות חיפוש'
+                                    : 'תור ההשמעה הנוכחי'),
+                            creator: matchedMeta?.author || '',
+                            isPublic: false,
+                            songs: playerState.queue
+                        });
+                        setActiveTab('playlist');
+                    }
+                }}
+                onAddCurrentSongToPlaylist={() => {
+                    if (!playerState.currentSong) return;
+                    setSongsToAdd([playerState.currentSong]);
+                    setShowPlaylistSelector(true);
+                }}
+                onToggleLikeCurrentSong={() => {
+                    if (playerState.currentSong) {
+                        handleToggleLike(playerState.currentSong);
+                    }
+                }}
                 onRemoveCurrentSong={() => {
                     if (!playerState.currentSong || !playingPlaylistId || playingPlaylistId.startsWith('temp-')) return;
                     const song = playerState.currentSong;

@@ -57,15 +57,19 @@ jobs:
         echo $ENCODED_STRING | base64 -d > android/my-release-key.keystore
         cp android/my-release-key.keystore android/app/my-release-key.keystore
 
-    # 7.5 יצירת מספור גרסה אוטומטי המבוסס על package.json וספירת הקומיטים
+    # 7.5 יצירת מספור גרסה אוטומטי וחתימת קוד Native/פלאגינים לזיהוי סוג העדכון (OTA מול APK)
     - name: Generate Shared Version Tag
       run: |
         COMMIT_COUNT=$(git rev-list --count HEAD)
         BASE_VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
         VERSION_NAME="${BASE_VERSION}.${COMMIT_COUNT}"
+        NEW_VERSION="v${VERSION_NAME}"
+        NATIVE_SIG=$(git rev-parse HEAD:android)-$(node -p "const p=require('./package.json'); JSON.stringify(p.dependencies||{})" | sha256sum | cut -c1-12)
         echo "COMMIT_COUNT=${COMMIT_COUNT}" >> $GITHUB_ENV
         echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_ENV
-        echo "NEW_VERSION=v${VERSION_NAME}" >> $GITHUB_ENV
+        echo "NEW_VERSION=${NEW_VERSION}" >> $GITHUB_ENV
+        echo "NATIVE_SIG=${NATIVE_SIG}" >> $GITHUB_ENV
+        node -e "const fs=require('fs'); fs.writeFileSync('version.json', JSON.stringify({version: process.env.NEW_VERSION || '${NEW_VERSION}', versionCode: Number('${COMMIT_COUNT}'), nativeSignature: '${NATIVE_SIG}', updatedAt: Date.now()}, null, 2));"
 
     # 8. מקמפל את אפליקציית האנדרואיד עם מספור אוטומטי וחותם עליה עם ה-Keystore הקבוע
     - name: Build and Sign Release APK
@@ -75,6 +79,7 @@ jobs:
         ./gradlew assembleRelease \
           -PversionCode=${{ env.COMMIT_COUNT }} \
           -PversionName=${{ env.VERSION_NAME }} \
+          -PnativeSignature=${{ env.NATIVE_SIG }} \
           -PRELEASE_STORE_FILE=my-release-key.keystore \
           -PRELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
           -PRELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
@@ -100,5 +105,5 @@ jobs:
         makeLatest: true
         allowUpdates: true
         replacesArtifacts: true
-        artifacts: "android/app/build/outputs/apk/release/app-release.apk,update.zip"
+        artifacts: "android/app/build/outputs/apk/release/app-release.apk,update.zip,version.json"
         token: ${{ secrets.GITHUB_TOKEN }}

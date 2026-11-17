@@ -1,14 +1,15 @@
 import { storageService } from '../StorageService';
-import { YouTubeSearchResult } from '../types';
+import { SongDetailedInfo, YouTubeSearchResult } from '../types';
 
 export const ENCRYPTION_STORAGE_KEY = 'streamify_encryption_enabled';
 const ENCRYPTION_KEY_STR = 'efitoyb';
 const ENCRYPTION_KEY_BYTES = new TextEncoder().encode(ENCRYPTION_KEY_STR);
 const IMAGE_XOR_KEY = 0x77;
 
-// זיכרון מטמון לתמונות מפוענחות (Blob URLs) כדי לא להוריד ולפענח פעמיים
+// זיכרון מטמון לתמונות מפוענחות (Blob URLs) ולמידע על שירים כדי לא להוריד פעמיים
 const decryptedImageCache = new Map<string, string>();
 const pendingImageLoads = new Map<string, Promise<string>>();
+const songDetailedInfoCache = new Map<string, SongDetailedInfo>();
 
 /**
  * קריאה סינכרונית מהירה של מצב ההצפנה (ברירת מחדל: true - מוצפן)
@@ -266,6 +267,67 @@ export const verifyAndFindReplacementApi = async (
         data.replacement = decryptSearchResultItem(data.replacement);
     }
     return data;
+};
+
+/**
+ * משיכה מהירה של מידע מפורט וטכני על שיר (כולל קרדיטים, מלחינים, צפיות, לייקים וכו')
+ */
+export const fetchSongDetailedInfoApi = async (
+    apiBaseUrl: string,
+    videoId: string,
+    encryptionEnabled: boolean
+): Promise<SongDetailedInfo | null> => {
+    if (!videoId) return null;
+    const cached = songDetailedInfoCache.get(videoId);
+    if (cached) return cached;
+
+    try {
+        const cleanBase = apiBaseUrl.replace(/\/$/, '');
+        const params = new URLSearchParams({
+            use_underscore: encryptionEnabled ? 'true' : 'false',
+            enc: encryptionEnabled ? '1' : '0'
+        });
+
+        const res = await fetch(`${cleanBase}/song-info/${videoId}?${params.toString()}`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data || !data.success || !data.info) return null;
+
+        const rawInfo = { ...data.info };
+        const shouldDecrypt = encryptionEnabled || Boolean(data.encrypted);
+
+        if (shouldDecrypt) {
+            for (const field of [
+                'title',
+                'artist',
+                'thumbnail_url',
+                'description',
+                'category',
+                'audioFormat'
+            ]) {
+                if (rawInfo[field] && typeof rawInfo[field] === 'string') {
+                    rawInfo[field] = decryptText(rawInfo[field]);
+                }
+            }
+            if (Array.isArray(rawInfo.tags)) {
+                rawInfo.tags = rawInfo.tags.map((t: any) =>
+                    typeof t === 'string' ? decryptText(t) : String(t)
+                );
+            }
+            if (Array.isArray(rawInfo.credits)) {
+                rawInfo.credits = rawInfo.credits.map((c: any) => ({
+                    label: typeof c.label === 'string' ? decryptText(c.label) : '',
+                    value: typeof c.value === 'string' ? decryptText(c.value) : ''
+                }));
+            }
+        }
+
+        songDetailedInfoCache.set(videoId, rawInfo as SongDetailedInfo);
+        return rawInfo as SongDetailedInfo;
+    } catch (e) {
+        console.warn('[SongInfo] Failed to fetch song detailed info:', e);
+        return null;
+    }
 };
 
 /**

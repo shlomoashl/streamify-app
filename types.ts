@@ -124,6 +124,32 @@ export interface LastPlayedInfo {
     queue?: MediaItem[];
 }
 
+export interface SongDetailedInfo {
+    id: string;
+    title: string;
+    artist: string;
+    channelId?: string;
+    thumbnail_url?: string;
+    publishedAt?: string;
+    viewCount?: number;
+    likeCount?: number;
+    commentCount?: number;
+    duration?: number;
+    definition?: string;
+    audioFormat?: string;
+    category?: string;
+    tags?: string[];
+    credits?: { label: string; value: string }[];
+    description?: string;
+}
+
+export interface ApkVersionInfo {
+    versionCode: number;
+    versionName: string;
+    nativeSignature: string;
+    lastUpdateTime?: number;
+}
+
 export interface StreamifyMediaPlugin {
     initialize(): Promise<void>;
     play(options: PlayOptions): Promise<void>;
@@ -138,6 +164,8 @@ export interface StreamifyMediaPlugin {
     warmup(options: { url: string }): Promise<void>;
     setEncryptionMode(options: { enabled: boolean }): Promise<{ enabled: boolean }>;
     getEncryptionMode(): Promise<{ enabled: boolean }>;
+    getApkInfo(): Promise<ApkVersionInfo>;
+    downloadAndInstallApk(options: { url: string; fallbackUrl?: string }): Promise<{ success: boolean }>;
     getDuration(): Promise<{ value: number }>;
     getCurrentTime(): Promise<{ value: number }>;
     getPlaybackState(): Promise<{ isPlaying: boolean; userPaused?: boolean }>;

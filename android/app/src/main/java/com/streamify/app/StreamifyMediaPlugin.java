@@ -2,15 +2,20 @@ package com.streamify.app;
 
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.util.Log;
 
 import androidx.annotation.OptIn;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
@@ -32,6 +37,11 @@ import com.google.common.util.concurrent.ListenableFuture;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -721,5 +731,161 @@ public class StreamifyMediaPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("enabled", enabled);
         call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getApkInfo(PluginCall call) {
+        try {
+            Context context = getContext();
+            PackageInfo pkgInfo = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+            String nativeSig = "legacy";
+            try {
+                int resId = context.getResources().getIdentifier("streamify_native_sig", "string", context.getPackageName());
+                if (resId != 0) {
+                    nativeSig = context.getString(resId);
+                }
+            } catch (Exception ignored) {}
+
+            JSObject ret = new JSObject();
+            ret.put("versionCode", pkgInfo.versionCode);
+            ret.put("versionName", pkgInfo.versionName != null ? pkgInfo.versionName : "1.0");
+            ret.put("nativeSignature", nativeSig);
+            ret.put("lastUpdateTime", pkgInfo.lastUpdateTime);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Failed to get APK info: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void downloadAndInstallApk(PluginCall call) {
+        final String primaryUrl = call.getString("url");
+        final String fallbackUrl = call.getString("fallbackUrl");
+        if (primaryUrl == null || primaryUrl.isEmpty()) {
+            call.reject("Missing APK download URL");
+            return;
+        }
+
+        new Thread(() -> {
+            Context context = getContext();
+            File apkFile = new File(context.getCacheDir(), "streamify-update.apk");
+            if (apkFile.exists()) {
+                apkFile.delete();
+            }
+
+            boolean downloaded = downloadFileWithProgress(primaryUrl, apkFile);
+            if (!downloaded && fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackUrl.equals(primaryUrl)) {
+                Log.w(TAG, "Primary APK download failed, trying fallback URL: " + fallbackUrl);
+                if (apkFile.exists()) apkFile.delete();
+                downloaded = downloadFileWithProgress(fallbackUrl, apkFile);
+            }
+
+            if (!downloaded || !apkFile.exists() || apkFile.length() < 100000) {
+                call.reject("הורדת קובץ העדכון נכשלה");
+                return;
+            }
+
+            handler.post(() -> {
+                try {
+                    Uri apkUri = FileProvider.getUriForFile(
+                            context,
+                            context.getPackageName() + ".fileprovider",
+                            apkFile
+                    );
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        if (!context.getPackageManager().canRequestPackageInstalls()) {
+                            Intent settingsIntent = new Intent(
+                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    Uri.parse("package:" + context.getPackageName())
+                            );
+                            settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            context.startActivity(settingsIntent);
+                            call.reject("יש לאשר התקנת אפליקציות ממקור זה בהגדרות שנפתחו, ולאחר מכן ללחוץ שוב על כפתור העדכון");
+                            return;
+                        }
+                    }
+
+                    Intent installIntent = new Intent(Intent.ACTION_VIEW);
+                    installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+                    installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(installIntent);
+
+                    JSObject ret = new JSObject();
+                    ret.put("success", true);
+                    call.resolve(ret);
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to launch APK installer", e);
+                    call.reject("שגיאה בפתיחת מתקין האפליקציה: " + e.getMessage());
+                }
+            });
+        }).start();
+    }
+
+    private boolean downloadFileWithProgress(String urlStr, File destFile) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(urlStr);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(true);
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(60000);
+            conn.setRequestProperty("User-Agent", "Streamify");
+
+            int status = conn.getResponseCode();
+            if (status == HttpURLConnection.HTTP_MOVED_TEMP ||
+                status == HttpURLConnection.HTTP_MOVED_PERM ||
+                status == HttpURLConnection.HTTP_SEE_OTHER ||
+                status == 307 || status == 308) {
+                String newUrl = conn.getHeaderField("Location");
+                conn.disconnect();
+                conn = (HttpURLConnection) new URL(newUrl).openConnection();
+                conn.setInstanceFollowRedirects(true);
+                conn.setConnectTimeout(20000);
+                conn.setReadTimeout(60000);
+                conn.setRequestProperty("User-Agent", "Streamify");
+                status = conn.getResponseCode();
+            }
+
+            if (status != HttpURLConnection.HTTP_OK) {
+                return false;
+            }
+
+            long totalLength = conn.getContentLengthLong();
+            try (InputStream in = conn.getInputStream();
+                 FileOutputStream out = new FileOutputStream(destFile)) {
+                byte[] buffer = new byte[32768];
+                long downloaded = 0;
+                int lastPercent = -1;
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
+                    downloaded += read;
+                    if (totalLength > 0) {
+                        int percent = (int) ((downloaded * 100L) / totalLength);
+                        if (percent != lastPercent && (percent % 2 == 0 || percent == 100)) {
+                            lastPercent = percent;
+                            final int p = percent;
+                            handler.post(() -> {
+                                JSObject evt = new JSObject();
+                                evt.put("action", "apkDownloadProgress");
+                                evt.put("value", p);
+                                notifyListeners("onMediaEvent", evt);
+                            });
+                        }
+                    }
+                }
+                out.flush();
+                out.getFD().sync();
+            }
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Error downloading APK from " + urlStr, e);
+            return false;
+        } finally {
+            if (conn != null) {
+                try { conn.disconnect(); } catch (Exception ignored) {}
+            }
+        }
     }
 }

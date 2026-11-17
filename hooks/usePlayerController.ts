@@ -396,7 +396,7 @@ export const usePlayerController = (params: {
                     playerState.isShuffled || isPlaylistStartAction
                         ? finalOriginalQueue
                         : undefined,
-                isExpanded: window.innerWidth < 768
+                isExpanded: false
             };
 
             const stateToSave = { ...newState, savedTime: 0, playingPlaylistId: playlistId };

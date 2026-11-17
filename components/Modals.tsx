@@ -131,7 +131,7 @@ export const InputModal: React.FC<{
     if (!modal.isOpen) return null;
     return (
         <div
-            className="fixed inset-0 bg-black/80 z-[120] flex items-center justify-center p-4 animate-fade-in"
+            className="fixed inset-0 bg-black/80 z-[135] flex items-center justify-center p-4 animate-fade-in"
             onClick={onClose}
         >
             <div
@@ -269,7 +269,7 @@ export const BulkImportModal: React.FC<{
 
     return (
         <div
-            className="fixed inset-0 bg-black/80 z-[120] flex items-center justify-center p-4 animate-fade-in"
+            className="fixed inset-0 bg-black/80 z-[135] flex items-center justify-center p-4 animate-fade-in"
             onClick={onClose}
         >
             <div
@@ -416,7 +416,7 @@ export const PlaylistSelectorModal: React.FC<{
     const availablePlaylists = playlists.filter((p) => !p.isLikedSongs && !p.externalId);
     return (
         <div
-            className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 animate-fade-in"
+            className="fixed inset-0 bg-black/80 z-[130] flex items-center justify-center p-4 animate-fade-in"
             onClick={onClose}
         >
             <div
