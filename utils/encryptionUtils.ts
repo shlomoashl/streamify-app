@@ -322,7 +322,16 @@ export const fetchSongDetailedInfoApi = async (
             }
         }
 
-        songDetailedInfoCache.set(videoId, rawInfo as SongDetailedInfo);
+        const hasRealDetails = Boolean(
+            (rawInfo.viewCount && rawInfo.viewCount > 0) ||
+                (rawInfo.likeCount && rawInfo.likeCount > 0) ||
+                rawInfo.publishedAt ||
+                rawInfo.description ||
+                (Array.isArray(rawInfo.credits) && rawInfo.credits.length > 0)
+        );
+        if (hasRealDetails) {
+            songDetailedInfoCache.set(videoId, rawInfo as SongDetailedInfo);
+        }
         return rawInfo as SongDetailedInfo;
     } catch (e) {
         console.warn('[SongInfo] Failed to fetch song detailed info:', e);
