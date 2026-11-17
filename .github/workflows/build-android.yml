@@ -32,12 +32,28 @@ jobs:
     - name: Install dependencies
       run: npm install
 
-    # 5. בונה את אפליקציית ה-Web
+    # 4.5 יצירת מספור גרסה אוטומטי וחתימת קוד Native/פלאגינים לפני הבנייה (מוטמע גם בפרונט וגם ב-APK)
+    - name: Generate Shared Version Tag
+      run: |
+        COMMIT_COUNT=$(git rev-list --count HEAD)
+        BASE_VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
+        VERSION_NAME="${BASE_VERSION}.${COMMIT_COUNT}"
+        NEW_VERSION="v${VERSION_NAME}"
+        NATIVE_SIG=$(git rev-parse HEAD:android)-$(node -p "const p=require('./package.json'); JSON.stringify(p.dependencies||{})" | sha256sum | cut -c1-12)
+        echo "COMMIT_COUNT=${COMMIT_COUNT}" >> $GITHUB_ENV
+        echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_ENV
+        echo "NEW_VERSION=${NEW_VERSION}" >> $GITHUB_ENV
+        echo "NATIVE_SIG=${NATIVE_SIG}" >> $GITHUB_ENV
+        node -e "const fs=require('fs'); fs.writeFileSync('version.json', JSON.stringify({version: process.env.NEW_VERSION || '${NEW_VERSION}', versionCode: Number('${COMMIT_COUNT}'), nativeSignature: '${NATIVE_SIG}', updatedAt: Date.now()}, null, 2));"
+
+    # 5. בונה את אפליקציית ה-Web כולל מספר הגרסה הנוכחי
     - name: Build Web App
       run: npm run build
       env:        
         VITE_SERVER_URL: ${{ secrets.VITE_SERVER_URL }}
         VITE_APP_ENTRY_CODE: ${{ secrets.VITE_APP_ENTRY_CODE }}
+        VITE_APP_VERSION: ${{ env.NEW_VERSION }}
+        VITE_VERSION_CODE: ${{ env.COMMIT_COUNT }}
 
     # 5.5 --- התוספת החדשה: דוחס את העיצוב (תיקיית dist) לקובץ ZIP ---
     - name: Create OTA Update Zip
@@ -56,20 +72,6 @@ jobs:
       run: |
         echo $ENCODED_STRING | base64 -d > android/my-release-key.keystore
         cp android/my-release-key.keystore android/app/my-release-key.keystore
-
-    # 7.5 יצירת מספור גרסה אוטומטי וחתימת קוד Native/פלאגינים לזיהוי סוג העדכון (OTA מול APK)
-    - name: Generate Shared Version Tag
-      run: |
-        COMMIT_COUNT=$(git rev-list --count HEAD)
-        BASE_VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
-        VERSION_NAME="${BASE_VERSION}.${COMMIT_COUNT}"
-        NEW_VERSION="v${VERSION_NAME}"
-        NATIVE_SIG=$(git rev-parse HEAD:android)-$(node -p "const p=require('./package.json'); JSON.stringify(p.dependencies||{})" | sha256sum | cut -c1-12)
-        echo "COMMIT_COUNT=${COMMIT_COUNT}" >> $GITHUB_ENV
-        echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_ENV
-        echo "NEW_VERSION=${NEW_VERSION}" >> $GITHUB_ENV
-        echo "NATIVE_SIG=${NATIVE_SIG}" >> $GITHUB_ENV
-        node -e "const fs=require('fs'); fs.writeFileSync('version.json', JSON.stringify({version: process.env.NEW_VERSION || '${NEW_VERSION}', versionCode: Number('${COMMIT_COUNT}'), nativeSignature: '${NATIVE_SIG}', updatedAt: Date.now()}, null, 2));"
 
     # 8. מקמפל את אפליקציית האנדרואיד עם מספור אוטומטי וחותם עליה עם ה-Keystore הקבוע
     - name: Build and Sign Release APK

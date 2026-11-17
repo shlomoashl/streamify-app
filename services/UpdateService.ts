@@ -4,10 +4,13 @@ import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { checkUpdate, installUpdate } from '@tauri-apps/api/updater';
 import { relaunch } from '@tauri-apps/api/process';
 import { ConfirmModalState } from '../components/Modals';
-import { StreamifyMediaPlugin } from '../types';
+import { ApkVersionInfo, StreamifyMediaPlugin } from '../types';
 import { YOUTUBE_API_BASE } from '../constants';
 
 const StreamifyMedia = registerPlugin<StreamifyMediaPlugin>('StreamifyMedia');
+
+const BUILT_WEB_VERSION_CODE = Number(import.meta.env.VITE_VERSION_CODE || 0);
+const BUILT_WEB_VERSION = String(import.meta.env.VITE_APP_VERSION || '');
 
 interface LatestReleaseInfo {
     version: string;
@@ -20,6 +23,45 @@ interface LatestReleaseInfo {
     hasZip: boolean;
     hasApk: boolean;
 }
+
+/**
+ * חישוב מדויק של מספר הגרסה הפעיל כעת באנדרואיד (הגבוה מבין ה-APK המותקן, הפרונט המובנה, וה-OTA האחרון)
+ */
+const getEffectiveAndroidState = async (): Promise<{
+    currentVersionCode: number;
+    currentVersionTag: string;
+    apkInfo: ApkVersionInfo | null;
+}> => {
+    let apkInfo: ApkVersionInfo | null = null;
+    try {
+        apkInfo = await StreamifyMedia.getApkInfo();
+    } catch {
+        try {
+            const capInfo = await CapacitorApp.getInfo();
+            apkInfo = {
+                versionCode: Number(capInfo.build || 1),
+                versionName: capInfo.version || '1.0',
+                nativeSignature: 'legacy'
+            };
+        } catch {}
+    }
+
+    const apkCode = Number(apkInfo?.versionCode || 0);
+    const savedOtaCode = Number(localStorage.getItem('streamify_installed_ota_code') || 0);
+    const currentVersionCode = Math.max(apkCode, BUILT_WEB_VERSION_CODE, savedOtaCode);
+
+    let currentVersionTag = BUILT_WEB_VERSION || '';
+    if (savedOtaCode > BUILT_WEB_VERSION_CODE) {
+        currentVersionTag = localStorage.getItem('streamify_installed_ota_tag') || currentVersionTag;
+    }
+    if (!currentVersionTag && apkInfo?.versionName) {
+        currentVersionTag = apkInfo.versionName.startsWith('v')
+            ? apkInfo.versionName
+            : `v${apkInfo.versionName}`;
+    }
+
+    return { currentVersionCode, currentVersionTag, apkInfo };
+};
 
 /**
  * מושך מידע על הגרסה האחרונה דרך שרת הפייתון (עוקף חסימות גיטהאב ברשתות מסוננות) עם גיבוי לגיטהאב ישירות
@@ -62,9 +104,17 @@ const fetchLatestReleaseMetadata = async (nocache = false): Promise<LatestReleas
             } catch {}
         }
 
+        // חילוץ מספר הגרסה גם מתוך תגית ה-Release (למשל v1.0.158 -> 158) כגיבוי אם אין version.json
+        let fallbackCode: number | undefined = manifestJson.versionCode;
+        if (!fallbackCode && data.tag_name) {
+            const parts = String(data.tag_name).replace(/^v/i, '').split('.');
+            const lastNum = Number(parts[parts.length - 1]);
+            if (!isNaN(lastNum) && lastNum > 0) fallbackCode = lastNum;
+        }
+
         return {
             version: data.tag_name || '',
-            versionCode: manifestJson.versionCode,
+            versionCode: fallbackCode,
             nativeSignature: manifestJson.nativeSignature,
             zipUpdatedAt: zipAsset?.updated_at || data.published_at,
             apkUpdatedAt: apkAsset?.updated_at || data.published_at,
@@ -77,6 +127,56 @@ const fetchLatestReleaseMetadata = async (nocache = false): Promise<LatestReleas
         console.error('[UpdateService] Failed to fetch release metadata:', e);
         return null;
     }
+};
+
+const evaluateAndroidUpdateNeed = (
+    releaseInfo: LatestReleaseInfo,
+    state: {
+        currentVersionCode: number;
+        currentVersionTag: string;
+        apkInfo: ApkVersionInfo | null;
+    }
+): {
+    hasUpdate: boolean;
+    requiresFullApk: boolean;
+} => {
+    const remoteCode = Number(releaseInfo.versionCode || 0);
+    const localCode = Number(state.currentVersionCode || 0);
+
+    // 1. בדיקת השוואת מספרי גרסה ישירה ומדויקת (לא תלויה בתאריכים שגויים!)
+    let hasUpdate = false;
+    if (remoteCode > 0 && localCode > 0) {
+        hasUpdate = remoteCode > localCode;
+    } else if (releaseInfo.version && state.currentVersionTag) {
+        hasUpdate = releaseInfo.version !== state.currentVersionTag;
+    } else if (releaseInfo.zipUpdatedAt) {
+        const serverDate = new Date(releaseInfo.zipUpdatedAt).getTime();
+        const localDate = parseInt(localStorage.getItem('streamify_app_version_date') || '0', 10);
+        hasUpdate = serverDate > localDate;
+    }
+
+    if (!hasUpdate) {
+        return { hasUpdate: false, requiresFullApk: false };
+    }
+
+    // 2. אם יש עדכון — קובעים האם נדרש עדכון APK מלא (שינוי ב-Native / פלאגינים) או עדכון פרונט קצר
+    let requiresFullApk = false;
+    const localNativeSig = state.apkInfo?.nativeSignature;
+    const remoteNativeSig = releaseInfo.nativeSignature;
+    const apkCode = Number(state.apkInfo?.versionCode || 0);
+
+    if (remoteNativeSig && localNativeSig) {
+        if (localNativeSig === 'legacy') {
+            requiresFullApk = remoteCode > apkCode;
+        } else if (remoteNativeSig !== localNativeSig) {
+            requiresFullApk = remoteCode === 0 || remoteCode > apkCode;
+        }
+    }
+
+    return {
+        hasUpdate: true,
+        requiresFullApk: requiresFullApk && releaseInfo.hasApk
+    };
 };
 
 export const checkInitialUpdateState = (setUpdateAvailable: (val: boolean) => void) => {
@@ -98,7 +198,10 @@ export const checkInitialUpdateState = (setUpdateAvailable: (val: boolean) => vo
                 const savedNativeVersion = localStorage.getItem('streamify_native_apk_version');
                 localStorage.setItem('streamify_native_apk_version', currentNativeVersion);
                 if (savedNativeVersion && savedNativeVersion !== currentNativeVersion) {
-                    localStorage.setItem('streamify_app_version_date', Date.now().toString());
+                    const apkCode = Number(info.build || 0);
+                    if (apkCode > 0) {
+                        localStorage.setItem('streamify_installed_ota_code', String(apkCode));
+                    }
                     setUpdateAvailable(false);
                 }
             })
@@ -107,6 +210,18 @@ export const checkInitialUpdateState = (setUpdateAvailable: (val: boolean) => vo
         CapacitorUpdater.current()
             .then((c) => console.log('Current bundle on app start:', c))
             .catch(console.error);
+
+        const pendingOtaCode = localStorage.getItem('streamify_pending_ota_code');
+        const pendingOtaTag = localStorage.getItem('streamify_pending_ota_tag');
+        if (pendingOtaCode) {
+            localStorage.setItem('streamify_installed_ota_code', pendingOtaCode);
+            if (pendingOtaTag) {
+                localStorage.setItem('streamify_installed_ota_tag', pendingOtaTag);
+            }
+            localStorage.removeItem('streamify_pending_ota_code');
+            localStorage.removeItem('streamify_pending_ota_tag');
+            setUpdateAvailable(false);
+        }
 
         const pendingUpdate = localStorage.getItem('streamify_pending_update');
         if (pendingUpdate) {
@@ -122,47 +237,14 @@ export const checkAndroidUpdateAvailabilitySilently = async (
 ) => {
     if (!Capacitor.isNativePlatform()) return;
     try {
-        const releaseInfo = await fetchLatestReleaseMetadata(false);
+        const [releaseInfo, localState] = await Promise.all([
+            fetchLatestReleaseMetadata(false),
+            getEffectiveAndroidState()
+        ]);
         if (!releaseInfo) return;
 
-        // 1. בדיקה אם יש שינוי ברכיבי ה-Native/פלאגינים שמחייב עדכון APK
-        try {
-            const apkInfo = await StreamifyMedia.getApkInfo();
-            if (
-                releaseInfo.nativeSignature &&
-                apkInfo?.nativeSignature &&
-                apkInfo.nativeSignature !== 'legacy' &&
-                releaseInfo.nativeSignature !== apkInfo.nativeSignature
-            ) {
-                setUpdateAvailable(true);
-                return;
-            }
-            if (
-                releaseInfo.versionCode &&
-                apkInfo?.versionCode &&
-                apkInfo.nativeSignature === 'legacy' &&
-                releaseInfo.versionCode > apkInfo.versionCode
-            ) {
-                setUpdateAvailable(true);
-                return;
-            }
-        } catch {}
-
-        // 2. בדיקה רגילה של תאריך ה-update.zip לעדכוני פרונט
-        if (releaseInfo.zipUpdatedAt) {
-            const serverDate = new Date(releaseInfo.zipUpdatedAt).getTime();
-            const localDateStr = localStorage.getItem('streamify_app_version_date');
-
-            if (!localDateStr) {
-                localStorage.setItem('streamify_app_version_date', serverDate.toString());
-                return;
-            }
-
-            const localDate = parseInt(localDateStr, 10);
-            if (serverDate > localDate) {
-                setUpdateAvailable(true);
-            }
-        }
+        const { hasUpdate } = evaluateAndroidUpdateNeed(releaseInfo, localState);
+        setUpdateAvailable(hasUpdate);
     } catch (e) {
         console.error('Failed to check for updates silently', e);
     }
@@ -222,40 +304,41 @@ export const runInteractiveUpdateCheck = async (callbacks: {
 
     const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     const cleanBase = YOUTUBE_API_BASE.replace(/\/$/, '');
-    setGlobalLoading('בודק עדכונים...');
+    setGlobalLoading('מחפש עדכונים...');
 
     try {
-        setUpdateStatusMsg('1/5: בודק גרסה אחרונה מול השרת...');
-        await delay(300);
+        setUpdateStatusMsg('1/5: בודק גרסה מול השרת...');
+        await delay(250);
 
-        const releaseInfo = await fetchLatestReleaseMetadata(true);
+        const [releaseInfo, localState] = await Promise.all([
+            fetchLatestReleaseMetadata(true),
+            getEffectiveAndroidState()
+        ]);
+
         if (!releaseInfo || !releaseInfo.version) {
             throw new Error('לא הצלחנו לקבל נתוני גרסה מהשרת');
         }
 
         const tagName = releaseInfo.version;
+        const { hasUpdate, requiresFullApk } = evaluateAndroidUpdateNeed(releaseInfo, localState);
 
-        // בדיקה מול השכבה הנייטיבית של האנדרואיד האם חל שינוי בקוד ה-Java/פלאגינים
-        let requiresFullApkUpdate = false;
-        try {
-            const apkInfo = await StreamifyMedia.getApkInfo();
-            if (releaseInfo.nativeSignature && apkInfo?.nativeSignature) {
-                if (
-                    apkInfo.nativeSignature === 'legacy' ||
-                    releaseInfo.nativeSignature !== apkInfo.nativeSignature
-                ) {
-                    // אם חתימת ה-Native השתנתה ויש גרסה חדשה יותר של ה-APK - נדרש עדכון APK מלא!
-                    if (!releaseInfo.versionCode || releaseInfo.versionCode > apkInfo.versionCode) {
-                        requiresFullApkUpdate = true;
-                    }
-                }
-            }
-        } catch (e) {
-            console.warn('[UpdateService] getApkInfo check fallback to OTA:', e);
+        // 0. בדיקה בדיוק כמו בווינדוס: אם כבר מעודכן - עוצרים ומודיעים "הכל מעודכן"!
+        if (!hasUpdate) {
+            setUpdateAvailable(false);
+            setGlobalLoading(null);
+            setUpdateStatusMsg('');
+            setConfirmModal({
+                isOpen: true,
+                title: 'הכל מעודכן',
+                message: `יש לך כבר את הגרסה העדכנית ביותר (${tagName}).`,
+                onConfirm: () => setConfirmModal((prev) => ({ ...prev, isOpen: false })),
+                isAlertOnly: true
+            });
+            return;
         }
 
-        // מסלול א': זוהה שינוי בפלאגינים / בקוד ה-Native של האנדרואיד -> הורדת APK והתקנה ישירה!
-        if (requiresFullApkUpdate && releaseInfo.hasApk) {
+        // מסלול א': עדכון מערכת מלא (APK — שינוי ב-Native / פלאגינים)
+        if (requiresFullApk) {
             setGlobalLoading(null);
             setUpdateStatusMsg('');
 
@@ -263,7 +346,7 @@ export const runInteractiveUpdateCheck = async (callbacks: {
                 isOpen: true,
                 title: `עדכון מערכת מלא זמין (${tagName})`,
                 message:
-                    'עדכון זה כולל שדרוג לרכיבי הנגן המובנים והפלאגינים באנדרואיד. האם להוריד את קובץ העדכון ולהתקין אותו כעת (ללא מחיקת נתונים)?',
+                    'עדכון זה כולל שדרוג לרכיבי הנגן המובנים והפלאגינים באנדרואיד (התקנת APK). האם להוריד ולהתקין כעת (ללא מחיקת נתונים)?',
                 onConfirm: async () => {
                     setConfirmModal((prev) => ({ ...prev, isOpen: false }));
                     setGlobalLoading('מוריד קובץ עדכון מערכת (APK)...');
@@ -275,7 +358,7 @@ export const runInteractiveUpdateCheck = async (callbacks: {
                             'onMediaEvent',
                             (evt: any) => {
                                 if (evt?.action === 'apkDownloadProgress') {
-                                    setUpdateStatusMsg(`מוריד קובץ עדכון: ${evt.value}%`);
+                                    setUpdateStatusMsg(`מוריד קובץ עדכון מערכת: ${evt.value}%`);
                                 }
                             }
                         );
@@ -314,64 +397,101 @@ export const runInteractiveUpdateCheck = async (callbacks: {
             return;
         }
 
-        // מסלול ב': עדכון פרונט (React/UI) בלבד -> עדכון פנימי מהיר (update.zip)
-        setUpdateStatusMsg(`2/5: נמצאה גרסה ${tagName}! מכין עדכון פנימי...`);
-        await delay(500);
-
-        const serverDate = releaseInfo.zipUpdatedAt
-            ? new Date(releaseInfo.zipUpdatedAt).getTime()
-            : Date.now();
-        const serverProxyZipUrl = `${cleanBase}/app-update-download?type=zip&t=${Date.now()}`;
-        const downloadUrl = releaseInfo.zipDownloadUrl || serverProxyZipUrl;
-
-        setUpdateStatusMsg(`3/5: מוריד את גרסה ${tagName}...`);
-        let result;
-        try {
-            result = await CapacitorUpdater.download({
-                url: serverProxyZipUrl,
-                version: tagName
-            });
-        } catch {
-            result = await CapacitorUpdater.download({
-                url: downloadUrl,
-                version: tagName
-            });
-        }
-
-        localStorage.setItem('streamify_pending_update', serverDate.toString());
-        setUpdateAvailable(false);
-
-        setUpdateStatusMsg('4/5: העדכון ירד בהצלחה. מכין להפעלה הבאה...');
-        await delay(800);
-
-        const updaterAny = CapacitorUpdater as any;
-        if (typeof updaterAny.next !== 'function') {
-            throw new Error(
-                'CapacitorUpdater.next לא קיים בגרסת הפלאגין. צריך לעדכן את @capgo/capacitor-updater'
-            );
-        }
-
-        await updaterAny.next({ id: result.id });
-        setUpdateStatusMsg(
-            '5/5: העדכון מוכן. סוגר את האפליקציה... פתחו אותה מחדש להשלמת העדכון'
-        );
-        await delay(1200);
-
+        // מסלול ב': עדכון פרונט קצר ומהיר בלבד (update.zip ללא החלפת APK)
         setGlobalLoading(null);
-        CapacitorApp.exitApp();
-    } catch (e: any) {
-        localStorage.removeItem('streamify_pending_update');
-        setUpdateStatusMsg(`שגיאה: ${e.message}`);
+        setUpdateStatusMsg('');
 
-        setTimeout(() => {
-            setGlobalLoading(null);
-            setConfirmModal({
-                isOpen: true,
-                title: 'שגיאת עדכון',
-                message: e.message || 'שגיאה לא ידועה.',
-                onConfirm: () => setConfirmModal((prev) => ({ ...prev, isOpen: false })),
-                isAlertOnly: true
-            });
-        }, 3000);
+        setConfirmModal({
+            isOpen: true,
+            title: `עדכון פרונט מהיר זמין (${tagName})`,
+            message:
+                'עדכון זה כולל שיפורי ממשק בלבד (ללא צורך בהתקנת APK). האם להתקין כעת?',
+            onConfirm: async () => {
+                setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+                setGlobalLoading('מוריד עדכון פנימי...');
+
+                try {
+                    setUpdateStatusMsg(`2/5: מכין עדכון פנימי לגרסה ${tagName}...`);
+                    await delay(400);
+
+                    const serverDate = releaseInfo.zipUpdatedAt
+                        ? new Date(releaseInfo.zipUpdatedAt).getTime()
+                        : Date.now();
+                    const serverProxyZipUrl = `${cleanBase}/app-update-download?type=zip&t=${Date.now()}`;
+                    const downloadUrl = releaseInfo.zipDownloadUrl || serverProxyZipUrl;
+
+                    setUpdateStatusMsg(`3/5: מוריד את גרסה ${tagName}...`);
+                    let result;
+                    try {
+                        result = await CapacitorUpdater.download({
+                            url: serverProxyZipUrl,
+                            version: tagName
+                        });
+                    } catch {
+                        result = await CapacitorUpdater.download({
+                            url: downloadUrl,
+                            version: tagName
+                        });
+                    }
+
+                    localStorage.setItem('streamify_pending_update', serverDate.toString());
+                    if (releaseInfo.versionCode) {
+                        localStorage.setItem(
+                            'streamify_pending_ota_code',
+                            String(releaseInfo.versionCode)
+                        );
+                    }
+                    localStorage.setItem('streamify_pending_ota_tag', tagName);
+                    setUpdateAvailable(false);
+
+                    setUpdateStatusMsg('4/5: העדכון ירד בהצלחה. מכין להפעלה הבאה...');
+                    await delay(600);
+
+                    const updaterAny = CapacitorUpdater as any;
+                    if (typeof updaterAny.next !== 'function') {
+                        throw new Error(
+                            'CapacitorUpdater.next לא קיים בגרסת הפלאגין. צריך לעדכן את @capgo/capacitor-updater'
+                        );
+                    }
+
+                    await updaterAny.next({ id: result.id });
+                    setUpdateStatusMsg(
+                        '5/5: העדכון מוכן. סוגר את האפליקציה... פתחו אותה מחדש להשלמת העדכון'
+                    );
+                    await delay(1000);
+
+                    setGlobalLoading(null);
+                    CapacitorApp.exitApp();
+                } catch (otaErr: any) {
+                    localStorage.removeItem('streamify_pending_update');
+                    localStorage.removeItem('streamify_pending_ota_code');
+                    localStorage.removeItem('streamify_pending_ota_tag');
+                    setUpdateStatusMsg(`שגיאה: ${otaErr.message}`);
+
+                    setTimeout(() => {
+                        setGlobalLoading(null);
+                        setUpdateStatusMsg('');
+                        setConfirmModal({
+                            isOpen: true,
+                            title: 'שגיאת עדכון',
+                            message: otaErr.message || 'שגיאה לא ידועה.',
+                            onConfirm: () =>
+                                setConfirmModal((prev) => ({ ...prev, isOpen: false })),
+                            isAlertOnly: true
+                        });
+                    }, 2500);
+                }
+            }
+        });
+    } catch (e: any) {
+        setGlobalLoading(null);
+        setUpdateStatusMsg('');
+        setConfirmModal({
+            isOpen: true,
+            title: 'שגיאת עדכון',
+            message: e.message || 'לא הצלחנו לבדוק עדכונים מול השרת.',
+            onConfirm: () => setConfirmModal((prev) => ({ ...prev, isOpen: false })),
+            isAlertOnly: true
+        });
     }
 };
