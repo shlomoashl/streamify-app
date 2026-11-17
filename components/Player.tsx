@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { PlayerState, SongDetailedInfo } from '../types';
 import { YOUTUBE_API_BASE } from '../constants';
 import {
@@ -35,6 +36,30 @@ const formatCount = (num?: number): string => {
     if (num >= 1_000) return `${(num / 1_000).toFixed(1).replace(/\.0$/, '')}K`;
     return num.toLocaleString('he-IL');
 };
+
+// רכיב חיצוני קבוע למניעת Unmount/הבהוב של התמונה בכל עדכון זמן של הנגן
+const PlayerArtwork: React.FC<{
+    imgSrc: string;
+    encryptionEnabled: boolean;
+    large?: boolean;
+}> = React.memo(({ imgSrc, encryptionEnabled, large }) => (
+    <div
+        className={`bg-neutral-800 flex items-center justify-center text-gray-200 overflow-hidden shadow-2xl flex-shrink-0 ${
+            large ? 'w-full aspect-square rounded-2xl border border-white/10' : 'w-12 h-12 rounded-lg'
+        }`}
+    >
+        <SmartImage
+            src={imgSrc}
+            encryptionEnabled={encryptionEnabled}
+            className="w-full h-full object-cover"
+            fallback={
+                <MusicIcon
+                    className={large ? 'w-24 h-24 text-gray-500' : 'w-6 h-6 text-gray-400'}
+                />
+            }
+        />
+    </div>
+));
 
 interface PlayerProps {
     playerState: PlayerState;
@@ -75,6 +100,7 @@ const Player: React.FC<PlayerProps> = ({
     onToggleLikeCurrentSong,
     onRemoveCurrentSong
 }) => {
+    const isDesktop = !Capacitor.isNativePlatform();
     const { currentSong, isPlaying, isExpanded, isShuffled } = playerState;
 
     const [currentTime, setCurrentTime] = useState(initialTime || 0);
@@ -203,29 +229,8 @@ const Player: React.FC<PlayerProps> = ({
         thumbnail: ''
     };
     const isDisabled = !currentSong;
-
-    const Artwork = ({ large }: { large?: boolean }) => {
-        const imgSrc = large
-            ? songDetails?.thumbnail_url || currentSong?.thumbnail || ''
-            : currentSong?.thumbnail
-            ? getLowResThumbnail(currentSong.thumbnail)
-            : '';
-
-        return (
-            <div
-                className={`bg-neutral-800 flex items-center justify-center text-gray-200 overflow-hidden shadow-xl flex-shrink-0 ${
-                    large ? 'w-full aspect-square rounded-2xl' : 'w-12 h-12 rounded-lg'
-                }`}
-            >
-                <SmartImage
-                    src={imgSrc}
-                    encryptionEnabled={isEncryptionEnabled}
-                    className="w-full h-full object-cover"
-                    fallback={<MusicIcon className={large ? 'w-24 h-24 text-gray-500' : 'w-6 h-6 text-gray-400'} />}
-                />
-            </div>
-        );
-    };
+    const barThumb = currentSong?.thumbnail ? getLowResThumbnail(currentSong.thumbnail) : '';
+    const largeThumb = songDetails?.thumbnail_url || currentSong?.thumbnail || '';
 
     if (isExpanded && currentSong) {
         const displayTitle = songDetails?.title || currentSong.title;
@@ -234,11 +239,13 @@ const Player: React.FC<PlayerProps> = ({
 
         return (
             <div
-                className="fixed inset-0 bg-gradient-to-b from-[#1e293b] via-[#121212] to-black z-[100] flex flex-col overflow-y-auto no-scrollbar animate-slide-up text-white"
+                className={`fixed inset-x-0 bottom-0 ${
+                    isDesktop ? 'top-8' : 'top-0'
+                } bg-gradient-to-br from-[#18222f] via-[#121212] to-black z-[100] flex flex-col overflow-hidden animate-slide-up text-white`}
                 dir="rtl"
             >
-                {/* Top Header */}
-                <div className="sticky top-0 z-10 flex justify-between items-center px-4 md:px-8 py-4 pt-[max(1.5rem,env(safe-area-inset-top))] bg-black/30 backdrop-blur-md border-b border-white/5">
+                {/* סרגל כותרת עליון - ממוקם נקי מתחת ל-TitleBar במחשב */}
+                <div className="flex-shrink-0 flex justify-between items-center px-4 md:px-8 py-3 pt-[max(0.9rem,env(safe-area-inset-top))] md:pt-3 bg-black/35 backdrop-blur-md border-b border-white/10">
                     <button
                         onClick={onToggleExpand}
                         className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition"
@@ -257,7 +264,7 @@ const Player: React.FC<PlayerProps> = ({
                                     onGoToPlaylist();
                                     onToggleExpand();
                                 }}
-                                className="flex items-center gap-1.5 text-xs md:text-sm font-bold text-spotify-primary hover:underline truncate max-w-[220px] md:max-w-xs mt-0.5"
+                                className="flex items-center gap-1.5 text-xs md:text-sm font-bold text-spotify-primary hover:underline truncate max-w-[230px] md:max-w-sm mt-0.5"
                                 title="עבור לפלייליסט שממנו השיר מופעל"
                             >
                                 <PlaylistIcon className="w-3.5 h-3.5 flex-shrink-0" />
@@ -279,83 +286,92 @@ const Player: React.FC<PlayerProps> = ({
                     </div>
                 </div>
 
-                {/* Main Content Wrapper */}
-                <div className="w-full max-w-4xl mx-auto px-5 md:px-10 py-6 flex flex-col gap-6 pb-16">
-                    {/* Upper Player Card: Artwork + Title + Actions + Controls */}
-                    <div className="flex flex-col md:flex-row gap-6 md:gap-10 items-center">
-                        <div className="w-full max-w-[300px] sm:max-w-[340px] md:w-72 flex-shrink-0">
-                            <Artwork large />
+                {/* פריסת Spotify דו-צדדית במחשב: צד שמאל = השיר והפקדים, צד ימין = המידע והקרדיטים */}
+                <div
+                    className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden"
+                    dir="ltr"
+                >
+                    {/* צד שמאל: תמונת השיר, כותרת, פעולות מהירות ופקדי ניגון */}
+                    <div
+                        className="w-full md:w-[44%] lg:w-[42%] flex-shrink-0 flex flex-col items-center justify-center p-6 md:p-8 md:border-r md:border-white/10 bg-gradient-to-b from-white/[0.03] to-black/30 md:overflow-y-auto no-scrollbar"
+                        dir="rtl"
+                    >
+                        <div className="w-full max-w-[270px] sm:max-w-[300px] lg:max-w-[320px] mb-5">
+                            <PlayerArtwork
+                                imgSrc={largeThumb}
+                                encryptionEnabled={isEncryptionEnabled}
+                                large
+                            />
                         </div>
 
-                        <div className="w-full flex-1 flex flex-col justify-between">
-                            {/* Title & Artist */}
-                            <div className="text-center md:text-right mb-5">
-                                <h2 className="text-2xl md:text-3xl font-black text-white leading-tight mb-1.5">
-                                    {displayTitle}
-                                </h2>
-                                <p className="text-base md:text-lg text-gray-300 font-medium">
-                                    {displayArtist}
-                                </p>
+                        <div className="w-full max-w-md text-center mb-4">
+                            <h2 className="text-xl md:text-2xl font-black text-white leading-snug line-clamp-2 mb-1">
+                                {displayTitle}
+                            </h2>
+                            <p className="text-sm md:text-base text-gray-300 font-medium truncate">
+                                {displayArtist}
+                            </p>
+                        </div>
+
+                        {/* כפתורי פעולה: לייק, הוספה לפלייליסט, חזרה לפלייליסט */}
+                        <div className="flex flex-wrap items-center justify-center gap-2 mb-5">
+                            {onToggleLikeCurrentSong && (
+                                <button
+                                    onClick={onToggleLikeCurrentSong}
+                                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs md:text-sm font-bold transition border ${
+                                        isCurrentSongLiked
+                                            ? 'bg-spotify-primary/20 border-spotify-primary text-spotify-primary'
+                                            : 'bg-white/10 border-white/10 hover:bg-white/20 text-white'
+                                    }`}
+                                >
+                                    <HeartIcon className="w-4 h-4" filled={isCurrentSongLiked} />
+                                    <span>{isCurrentSongLiked ? 'אהבתי' : 'לייק'}</span>
+                                </button>
+                            )}
+
+                            {onAddCurrentSongToPlaylist && (
+                                <button
+                                    onClick={onAddCurrentSongToPlaylist}
+                                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs md:text-sm font-bold bg-spotify-primary text-black hover:scale-105 active:scale-95 transition shadow-lg"
+                                >
+                                    <PlusIcon className="w-4 h-4" />
+                                    <span>הוסף לפלייליסט</span>
+                                </button>
+                            )}
+
+                            {canGoToPlaylist && onGoToPlaylist && (
+                                <button
+                                    onClick={() => {
+                                        onGoToPlaylist();
+                                        onToggleExpand();
+                                    }}
+                                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs md:text-sm font-bold bg-white/10 hover:bg-white/20 border border-white/10 text-white transition"
+                                >
+                                    <PlaylistIcon className="w-4 h-4" />
+                                    <span>לפלייליסט</span>
+                                </button>
+                            )}
+                        </div>
+
+                        {/* פס התקדמות */}
+                        <div className="w-full max-w-md mb-4" dir="ltr">
+                            <input
+                                type="range"
+                                min={0}
+                                max={effectiveDuration || 100}
+                                value={currentTime}
+                                onChange={(e) => handleSeekInput(Number(e.target.value))}
+                                className="w-full h-1.5 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-spotify-primary"
+                            />
+                            <div className="flex justify-between text-xs text-gray-400 mt-1.5 font-mono">
+                                <span>{formatTime(currentTime)}</span>
+                                <span>{formatTime(effectiveDuration)}</span>
                             </div>
+                        </div>
 
-                            {/* Quick Action Buttons: Like, Add to Playlist, Back to Playlist */}
-                            <div className="flex flex-wrap items-center justify-center md:justify-start gap-2.5 mb-6">
-                                {onToggleLikeCurrentSong && (
-                                    <button
-                                        onClick={onToggleLikeCurrentSong}
-                                        className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition border ${
-                                            isCurrentSongLiked
-                                                ? 'bg-spotify-primary/20 border-spotify-primary text-spotify-primary'
-                                                : 'bg-white/10 border-white/10 hover:bg-white/20 text-white'
-                                        }`}
-                                    >
-                                        <HeartIcon className="w-4 h-4" filled={isCurrentSongLiked} />
-                                        <span>{isCurrentSongLiked ? 'אהבתי' : 'לייק'}</span>
-                                    </button>
-                                )}
-
-                                {onAddCurrentSongToPlaylist && (
-                                    <button
-                                        onClick={onAddCurrentSongToPlaylist}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold bg-spotify-primary text-black hover:scale-105 active:scale-95 transition shadow-lg"
-                                    >
-                                        <PlusIcon className="w-4 h-4" />
-                                        <span>הוסף לפלייליסט</span>
-                                    </button>
-                                )}
-
-                                {canGoToPlaylist && onGoToPlaylist && (
-                                    <button
-                                        onClick={() => {
-                                            onGoToPlaylist();
-                                            onToggleExpand();
-                                        }}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold bg-white/10 hover:bg-white/20 border border-white/10 text-white transition"
-                                    >
-                                        <PlaylistIcon className="w-4 h-4" />
-                                        <span>חזור לפלייליסט</span>
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* Seek Bar */}
-                            <div className="mb-5" dir="ltr">
-                                <input
-                                    type="range"
-                                    min={0}
-                                    max={effectiveDuration || 100}
-                                    value={currentTime}
-                                    onChange={(e) => handleSeekInput(Number(e.target.value))}
-                                    className="w-full h-1.5 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-spotify-primary"
-                                />
-                                <div className="flex justify-between text-xs text-gray-400 mt-2 font-mono">
-                                    <span>{formatTime(currentTime)}</span>
-                                    <span>{formatTime(effectiveDuration)}</span>
-                                </div>
-                            </div>
-
-                            {/* Playback Controls */}
-                            <div className="flex justify-between items-center px-2 md:px-0 max-w-md mx-auto md:mx-0 w-full">
+                        {/* כפתורי שליטה ווליום */}
+                        <div className="w-full max-w-md flex flex-col gap-3">
+                            <div className="flex justify-between items-center px-3">
                                 <button
                                     onClick={onShuffle}
                                     className={`p-2 rounded-full hover:bg-white/10 transition ${
@@ -363,20 +379,20 @@ const Player: React.FC<PlayerProps> = ({
                                     }`}
                                     title="ערבוב"
                                 >
-                                    <ShuffleIcon className="w-6 h-6" active={isShuffled} />
+                                    <ShuffleIcon className="w-5 h-5" active={isShuffled} />
                                 </button>
                                 <button
                                     onClick={onNext}
                                     className="p-2 rounded-full hover:bg-white/10 text-white transition"
                                     title="השיר הבא"
                                 >
-                                    <SkipForwardIcon className="w-9 h-9" />
+                                    <SkipForwardIcon className="w-8 h-8" />
                                 </button>
                                 <button
                                     onClick={onPlayPause}
-                                    className="bg-white text-black rounded-full p-4 hover:scale-105 active:scale-95 transition shadow-xl"
+                                    className="bg-white text-black rounded-full p-3.5 hover:scale-105 active:scale-95 transition shadow-xl"
                                 >
-                                    <div className="w-8 h-8 flex items-center justify-center">
+                                    <div className="w-7 h-7 flex items-center justify-center">
                                         {isPlaying ? <PauseIcon fill /> : <PlayIcon fill />}
                                     </div>
                                 </button>
@@ -385,9 +401,13 @@ const Player: React.FC<PlayerProps> = ({
                                     className="p-2 rounded-full hover:bg-white/10 text-white transition"
                                     title="השיר הקודם"
                                 >
-                                    <SkipBackIcon className="w-9 h-9" />
+                                    <SkipBackIcon className="w-8 h-8" />
                                 </button>
-                                <div className="hidden md:flex items-center gap-2" dir="ltr">
+                                <div className="w-9" />
+                            </div>
+
+                            {isDesktop && (
+                                <div className="flex items-center justify-center gap-2 pt-1" dir="ltr">
                                     <button
                                         onClick={toggleMute}
                                         className="text-gray-400 hover:text-white"
@@ -401,135 +421,140 @@ const Player: React.FC<PlayerProps> = ({
                                         step={0.01}
                                         value={volume}
                                         onChange={handleVolumeChange}
-                                        className="w-20 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-white"
+                                        className="w-28 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-white hover:accent-spotify-primary"
                                     />
                                 </div>
-                                <div className="w-8 md:hidden" />
-                            </div>
+                            )}
                         </div>
                     </div>
 
-                    {/* Spotify-style Detailed YouTube Music Info & Credits */}
-                    <div className="border-t border-white/10 pt-6 space-y-4">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-lg font-bold text-white">מידע וקרדיטים מ-YouTube Music</h3>
+                    {/* צד ימין: כל המידע, הקרדיטים, הסטטיסטיקות והנתונים הטכניים מ-YouTube Music */}
+                    <div
+                        className="w-full md:w-[56%] lg:w-[58%] flex-1 md:overflow-y-auto no-scrollbar p-5 md:p-8 space-y-5 pb-12"
+                        dir="rtl"
+                    >
+                        <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                            <div>
+                                <h3 className="text-lg md:text-xl font-bold text-white">
+                                    על השיר • YouTube Music
+                                </h3>
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                    קרדיטים, נתוני השמעה ופרטים טכניים
+                                </p>
+                            </div>
                             {isLoadingDetails && !songDetails && (
-                                <span className="text-xs text-spotify-primary animate-pulse">
+                                <span className="text-xs font-semibold text-spotify-primary animate-pulse bg-spotify-primary/10 px-3 py-1 rounded-full">
                                     טוען פרטים...
                                 </span>
                             )}
                         </div>
 
-                        {/* Stats / Ratings */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                            <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+                        {/* כרטיסיות סטטיסטיקה ודירוגים */}
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div className="bg-white/5 border border-white/10 rounded-xl p-3.5">
                                 <div className="text-[11px] text-gray-400 mb-1">צפיות</div>
-                                <div className="text-base font-bold text-white">
+                                <div className="text-base md:text-lg font-bold text-white">
                                     {formatCount(songDetails?.viewCount)}
                                 </div>
                             </div>
-                            <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+                            <div className="bg-white/5 border border-white/10 rounded-xl p-3.5">
                                 <div className="text-[11px] text-gray-400 mb-1">לייקים / דירוג</div>
-                                <div className="text-base font-bold text-white">
+                                <div className="text-base md:text-lg font-bold text-white">
                                     {formatCount(songDetails?.likeCount)}
                                 </div>
                             </div>
-                            <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+                            <div className="bg-white/5 border border-white/10 rounded-xl p-3.5">
                                 <div className="text-[11px] text-gray-400 mb-1">תגובות</div>
-                                <div className="text-base font-bold text-white">
+                                <div className="text-base md:text-lg font-bold text-white">
                                     {formatCount(songDetails?.commentCount)}
                                 </div>
                             </div>
-                            <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+                            <div className="bg-white/5 border border-white/10 rounded-xl p-3.5">
                                 <div className="text-[11px] text-gray-400 mb-1">תאריך יציאה</div>
-                                <div className="text-base font-bold text-white font-mono">
+                                <div className="text-base md:text-lg font-bold text-white font-mono">
                                     {songDetails?.publishedAt || '—'}
                                 </div>
                             </div>
                         </div>
 
-                        {/* Credits & Technical Info Grid */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Credits card */}
-                            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2.5">
-                                <h4 className="text-sm font-bold text-spotify-primary mb-2">
-                                    אמנים, מלחינים ויוצרים
-                                </h4>
-                                <div className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2">
-                                    <span className="text-gray-400">זמר / ערוץ</span>
-                                    <span className="font-semibold text-white text-left">
-                                        {displayArtist || 'לא צוין'}
-                                    </span>
-                                </div>
-
-                                {songDetails?.credits && songDetails.credits.length > 0 ? (
-                                    songDetails.credits.map((c, idx) => (
-                                        <div
-                                            key={idx}
-                                            className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2 last:border-b-0 last:pb-0"
-                                        >
-                                            <span className="text-gray-400 flex-shrink-0">
-                                                {c.label}
-                                            </span>
-                                            <span className="font-medium text-gray-100 text-left break-words">
-                                                {c.value}
-                                            </span>
-                                        </div>
-                                    ))
-                                ) : (
-                                    <div className="text-xs text-gray-500 pt-1">
-                                        {isLoadingDetails
-                                            ? 'שולף קרדיטים ויוצרים...'
-                                            : 'אין קרדיטים נוספים זמינים בדף השיר'}
-                                    </div>
-                                )}
+                        {/* קרדיטים ויוצרים */}
+                        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2.5">
+                            <h4 className="text-sm font-bold text-spotify-primary mb-2">
+                                אמנים, מלחינים ויוצרים
+                            </h4>
+                            <div className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2">
+                                <span className="text-gray-400">זמר / ערוץ</span>
+                                <span className="font-semibold text-white text-left">
+                                    {displayArtist || 'לא צוין'}
+                                </span>
                             </div>
 
-                            {/* Technical Details card */}
-                            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2.5">
-                                <h4 className="text-sm font-bold text-spotify-primary mb-2">
-                                    מידע טכני
-                                </h4>
-                                <div className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2">
-                                    <span className="text-gray-400">פורמט אודיו</span>
-                                    <span className="font-mono text-xs md:text-sm text-gray-100 text-left" dir="ltr">
-                                        {songDetails?.audioFormat || 'M4A (AAC-LC 128kbps)'}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2">
-                                    <span className="text-gray-400">איכות מקור</span>
-                                    <span className="font-mono text-sm text-gray-100">
-                                        {songDetails?.definition || 'HD'}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2">
-                                    <span className="text-gray-400">משך מדויק</span>
-                                    <span className="font-mono text-sm text-gray-100">
-                                        {formatTime(effectiveDuration)}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2">
-                                    <span className="text-gray-400">מזהה שיר (Video ID)</span>
-                                    <span className="font-mono text-xs text-gray-300" dir="ltr">
-                                        {currentSong.id}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between gap-3 text-sm">
-                                    <span className="text-gray-400">מצב הצפנה</span>
-                                    <span
-                                        className={`font-bold text-xs px-2.5 py-0.5 rounded-full ${
-                                            isEncryptionEnabled
-                                                ? 'bg-spotify-primary/20 text-spotify-primary'
-                                                : 'bg-white/10 text-gray-300'
-                                        }`}
+                            {songDetails?.credits && songDetails.credits.length > 0 ? (
+                                songDetails.credits.map((c, idx) => (
+                                    <div
+                                        key={idx}
+                                        className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2 last:border-b-0 last:pb-0"
                                     >
-                                        {isEncryptionEnabled ? 'מוצפן (מלא)' : 'ישיר (ללא הצפנה)'}
-                                    </span>
+                                        <span className="text-gray-400 flex-shrink-0">{c.label}</span>
+                                        <span className="font-medium text-gray-100 text-left break-words">
+                                            {c.value}
+                                        </span>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="text-xs text-gray-500 pt-1">
+                                    {isLoadingDetails
+                                        ? 'שולף קרדיטים ויוצרים...'
+                                        : 'אין קרדיטים נוספים זמינים בדף השיר'}
                                 </div>
+                            )}
+                        </div>
+
+                        {/* מידע טכני */}
+                        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2.5">
+                            <h4 className="text-sm font-bold text-spotify-primary mb-2">מידע טכני</h4>
+                            <div className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2">
+                                <span className="text-gray-400">פורמט אודיו</span>
+                                <span
+                                    className="font-mono text-xs md:text-sm text-gray-100 text-left"
+                                    dir="ltr"
+                                >
+                                    {songDetails?.audioFormat || 'M4A (AAC-LC 128kbps)'}
+                                </span>
+                            </div>
+                            <div className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2">
+                                <span className="text-gray-400">איכות מקור</span>
+                                <span className="font-mono text-sm text-gray-100">
+                                    {songDetails?.definition || 'HD'}
+                                </span>
+                            </div>
+                            <div className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2">
+                                <span className="text-gray-400">משך מדויק</span>
+                                <span className="font-mono text-sm text-gray-100">
+                                    {formatTime(effectiveDuration)}
+                                </span>
+                            </div>
+                            <div className="flex justify-between gap-3 text-sm border-b border-white/5 pb-2">
+                                <span className="text-gray-400">מזהה שיר (Video ID)</span>
+                                <span className="font-mono text-xs text-gray-300" dir="ltr">
+                                    {currentSong.id}
+                                </span>
+                            </div>
+                            <div className="flex justify-between gap-3 text-sm">
+                                <span className="text-gray-400">מצב הצפנה</span>
+                                <span
+                                    className={`font-bold text-xs px-2.5 py-0.5 rounded-full ${
+                                        isEncryptionEnabled
+                                            ? 'bg-spotify-primary/20 text-spotify-primary'
+                                            : 'bg-white/10 text-gray-300'
+                                    }`}
+                                >
+                                    {isEncryptionEnabled ? 'מוצפן (מלא)' : 'ישיר (ללא הצפנה)'}
+                                </span>
                             </div>
                         </div>
 
-                        {/* Tags */}
+                        {/* תגיות */}
                         {songDetails?.tags && songDetails.tags.length > 0 && (
                             <div className="flex flex-wrap gap-2">
                                 {songDetails.tags.map((tag, i) => (
@@ -543,7 +568,7 @@ const Player: React.FC<PlayerProps> = ({
                             </div>
                         )}
 
-                        {/* Description */}
+                        {/* תיאור מלא */}
                         {songDetails?.description && (
                             <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
                                 <div className="flex justify-between items-center mb-2">
@@ -561,7 +586,7 @@ const Player: React.FC<PlayerProps> = ({
                                 </div>
                                 <p
                                     className={`text-xs md:text-sm text-gray-300 whitespace-pre-line leading-relaxed ${
-                                        showFullDescription ? '' : 'line-clamp-4'
+                                        showFullDescription ? '' : 'line-clamp-5'
                                     }`}
                                 >
                                     {songDetails.description}
@@ -598,7 +623,10 @@ const Player: React.FC<PlayerProps> = ({
                     }}
                     className={!isDisabled ? 'cursor-pointer' : ''}
                 >
-                    <Artwork />
+                    <PlayerArtwork
+                        imgSrc={barThumb}
+                        encryptionEnabled={isEncryptionEnabled}
+                    />
                 </div>
                 <div
                     className={`min-w-0 flex-1 relative ${!isDisabled ? 'cursor-pointer' : ''}`}
@@ -611,7 +639,9 @@ const Player: React.FC<PlayerProps> = ({
                 >
                     <div
                         className={`font-semibold text-sm truncate ${
-                            isDisabled ? 'text-gray-500' : 'text-white hover:text-spotify-primary transition-colors'
+                            isDisabled
+                                ? 'text-gray-500'
+                                : 'text-white hover:text-spotify-primary transition-colors'
                         }`}
                     >
                         {displaySong.title}
@@ -716,7 +746,7 @@ const Player: React.FC<PlayerProps> = ({
                         value={volume}
                         onClick={(e) => e.stopPropagation()}
                         onChange={handleVolumeChange}
-                        className="w-24 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-white hover:accent-green-500"
+                        className="w-24 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-white hover:accent-spotify-primary"
                     />
                 </div>
             </div>

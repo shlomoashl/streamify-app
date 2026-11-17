@@ -339,6 +339,18 @@ export const fetchSongDetailedInfoApi = async (
     }
 };
 
+export const getCachedEncryptedImageBlobUrl = (originalImageUrl: string): string | null => {
+    if (!originalImageUrl) return null;
+    if (
+        originalImageUrl.startsWith('blob:') ||
+        originalImageUrl.startsWith('data:') ||
+        originalImageUrl.includes('via.placeholder.com')
+    ) {
+        return originalImageUrl;
+    }
+    return decryptedImageCache.get(originalImageUrl) || null;
+};
+
 /**
  * הורדה ופענוח של תמונה מוצפנת (XOR 0x77) מהשרת והמרתה ל-Blob URL מקומי
  */
