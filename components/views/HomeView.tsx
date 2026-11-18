@@ -133,10 +133,11 @@ export const HomeView: React.FC<{
                         <div className="flex gap-2 md:hidden">
                             <button
                                 onClick={onShowLogs}
-                                className="p-3 bg-white/10 rounded-full text-white hover:bg-white/20"
-                                title="לוגים"
+                                className="px-3 py-2 bg-white/10 rounded-full text-white hover:bg-white/20 flex items-center gap-1.5 text-xs font-bold"
+                                title="ניהול"
                             >
-                                <TerminalIcon className="w-5 h-5" />
+                                <TerminalIcon className="w-4 h-4" />
+                                <span>ניהול</span>
                             </button>
                             <button
                                 onClick={onLogout}

@@ -13,7 +13,7 @@ import { YOUTUBE_API_BASE } from './constants';
 import { LoaderIcon } from './components/Icons';
 import Player from './components/Player';
 import TitleBar from './components/TitleBar';
-import LogViewer from './components/LogViewer';
+import LogViewer, { AdminManagementModal } from './components/LogViewer';
 import { storageService } from './StorageService';
 import { audioService } from './AudioService';
 import { searchResultToPlaylistItem } from './utils/mediaUtils';
@@ -77,6 +77,7 @@ const App: React.FC = () => {
     const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
     const [expandedHomeFolders, setExpandedHomeFolders] = useState<Set<string>>(new Set());
     const [showLogs, setShowLogs] = useState(false);
+    const [showAdminModal, setShowAdminModal] = useState(false);
     const [globalLoading, setGlobalLoading] = useState<string | null>(null);
     const [updateStatusMsg, setUpdateStatusMsg] = useState<string>('');
     const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -321,6 +322,7 @@ const App: React.FC = () => {
         moveToFolderOpen: moveToFolderState.visible,
         contextMenuOpen: !!contextMenu,
         showLogs,
+        showAdminModal,
         playerExpanded: playerState.isExpanded,
         activeTab,
         prevTab
@@ -336,6 +338,7 @@ const App: React.FC = () => {
             moveToFolderOpen: moveToFolderState.visible,
             contextMenuOpen: !!contextMenu,
             showLogs,
+            showAdminModal,
             playerExpanded: playerState.isExpanded,
             activeTab,
             prevTab
@@ -349,6 +352,7 @@ const App: React.FC = () => {
         moveToFolderState.visible,
         contextMenu,
         showLogs,
+        showAdminModal,
         playerState.isExpanded,
         activeTab,
         prevTab
@@ -365,6 +369,7 @@ const App: React.FC = () => {
             if (s.playlistSelectorOpen) return setShowPlaylistSelector(false);
             if (s.moveToFolderOpen) return setMoveToFolderState({ visible: false, playlistId: null });
             if (s.contextMenuOpen) return setContextMenu(null);
+            if (s.showAdminModal) return setShowAdminModal(false);
             if (s.showLogs) return setShowLogs(false);
             if (s.playerExpanded) return setPlayerState((p) => ({ ...p, isExpanded: false }));
             if (s.activeTab === 'playlist') return setActiveTab(s.prevTab);
@@ -643,7 +648,18 @@ const App: React.FC = () => {
     return (
         <div className={`flex flex-col h-screen bg-spotify-base text-white overflow-hidden font-sans ${isDesktop ? 'pt-8' : ''}`}>
             <TitleBar />
-            {showLogs && <LogViewer onClose={() => setShowLogs(false)} />}
+            <AdminManagementModal
+                isOpen={showAdminModal}
+                isEncryptionEnabled={isEncryptionEnabled}
+                onClose={() => setShowAdminModal(false)}
+                onOpenLogs={() => setShowLogs(true)}
+            />
+            {showLogs && (
+                <LogViewer
+                    isEncryptionEnabled={isEncryptionEnabled}
+                    onClose={() => setShowLogs(false)}
+                />
+            )}
 
             <GlobalLoader globalLoading={globalLoading} updateStatusMsg={updateStatusMsg} />
             <ConfirmationModal modal={confirmModal} onClose={() => setConfirmModal((p) => ({ ...p, isOpen: false }))} />
@@ -807,22 +823,7 @@ const App: React.FC = () => {
                         });
                         setInputModalValue('');
                     }}
-                    onPromptRestartServer={() =>
-                        setConfirmModal({
-                            isOpen: true,
-                            title: 'אתחול שרת',
-                            message: 'האם אתה בטוח שברצונך לאתחל את השרת? המוזיקה תפסיק.',
-                            onConfirm: async () => {
-                                try {
-                                    await fetch(`${YOUTUBE_API_BASE}/restart`, { method: 'POST' });
-                                    setConfirmModal((p) => ({ ...p, isOpen: false }));
-                                    alert('השרת מבצע אתחול...');
-                                } catch {
-                                    alert('שגיאה בביצוע אתחול');
-                                }
-                            }
-                        })
-                    }
+                    onPromptRestartServer={() => setShowAdminModal(true)}
                     onLogout={handleLogout}
                 />
 
@@ -866,7 +867,7 @@ const App: React.FC = () => {
                                     setConfirmModal
                                 })
                             }
-                            onShowLogs={() => setShowLogs(true)}
+                            onShowLogs={() => setShowAdminModal(true)}
                             onLogout={handleLogout}
                         />
                     )}

@@ -11,8 +11,8 @@ import {
     LogOutIcon,
     MusicIcon,
     PlusIcon,
-    RefreshCcwIcon,
-    SearchIcon
+    SearchIcon,
+    TerminalIcon
 } from './Icons';
 
 export const LoginScreen: React.FC<{
@@ -202,7 +202,7 @@ export const DesktopSidebar: React.FC<{
                     onClick={onPromptRestartServer}
                     className="p-3 text-sm text-gray-500 hover:text-white flex items-center gap-3 hover:bg-white/10 rounded-lg transition-colors"
                 >
-                    <RefreshCcwIcon className="w-5 h-5" /> <span>אתחול שרת</span>
+                    <TerminalIcon className="w-5 h-5" /> <span>ניהול</span>
                 </button>
                 <button
                     onClick={onLogout}
