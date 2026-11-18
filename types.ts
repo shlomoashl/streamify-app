@@ -143,6 +143,20 @@ export interface SongDetailedInfo {
     description?: string;
 }
 
+export interface SyncedLyricLine {
+    time: number;
+    text: string;
+}
+
+export interface SongLyricsData {
+    id: string;
+    hasLyrics: boolean;
+    isSynced: boolean;
+    plainLyrics: string;
+    syncedLines: SyncedLyricLine[];
+    source?: string;
+}
+
 export interface ApkVersionInfo {
     versionCode: number;
     versionName: string;

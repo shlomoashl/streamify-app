@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { PlayerState, SongDetailedInfo } from '../types';
+import { PlayerState, SongDetailedInfo, SongLyricsData } from '../types';
 import { YOUTUBE_API_BASE } from '../constants';
 import {
     PlayIcon,
@@ -16,11 +16,13 @@ import {
     HeartIcon,
     PlusIcon,
     PlaylistIcon,
-    TrashIcon
+    TrashIcon,
+    CopyIcon,
+    LoaderIcon
 } from './Icons';
 import { SmartImage } from './SmartImage';
 import { audioService } from '../AudioService';
-import { fetchSongDetailedInfoApi } from '../utils/encryptionUtils';
+import { fetchSongDetailedInfoApi, fetchSongLyricsApi } from '../utils/encryptionUtils';
 import { getLowResThumbnail } from '../utils/mediaUtils';
 
 const formatTime = (seconds: number) => {
@@ -109,9 +111,15 @@ const Player: React.FC<PlayerProps> = ({
 
     const [songDetails, setSongDetails] = useState<SongDetailedInfo | null>(null);
     const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+    const [songLyrics, setSongLyrics] = useState<SongLyricsData | null>(null);
+    const [isLoadingLyrics, setIsLoadingLyrics] = useState(false);
+    const [activeRightTab, setActiveRightTab] = useState<'info' | 'lyrics'>('info');
+    const [autoScrollLyrics, setAutoScrollLyrics] = useState(true);
+    const [copiedLyrics, setCopiedLyrics] = useState(false);
     const [showFullDescription, setShowFullDescription] = useState(false);
     const [isDescriptionTruncated, setIsDescriptionTruncated] = useState(false);
     const descriptionRef = useRef<HTMLParagraphElement | null>(null);
+    const activeLyricLineRef = useRef<HTMLButtonElement | null>(null);
 
     // סנכרון הזמן הראשוני שנשמר (למשל בעלייה מחדש במולטימדיה לרכב)
     useEffect(() => {
@@ -124,6 +132,9 @@ const Player: React.FC<PlayerProps> = ({
         if (currentSong?.id !== lastSongIdRef.current) {
             lastSongIdRef.current = currentSong?.id || null;
             setSongDetails(null);
+            setSongLyrics(null);
+            setCopiedLyrics(false);
+            setAutoScrollLyrics(true);
             setShowFullDescription(false);
             setIsDescriptionTruncated(false);
             if (currentSong?.duration) {
@@ -155,11 +166,12 @@ const Player: React.FC<PlayerProps> = ({
         return () => cancelAnimationFrame(raf);
     }, [songDetails?.description, showFullDescription, isExpanded]);
 
-    // טעינה מהירה של מידע מפורט מיוטיוב מיוזיק רק כשמסך השיר המלא פתוח (עם Cache בזיכרון)
+    // טעינה מהירה במקביל של מידע מפורט ומילות השיר מיוטיוב מיוזיק / LRCLIB רק כשמסך השיר המלא פתוח
     useEffect(() => {
         if (!isExpanded || !currentSong?.id) return;
         let cancelled = false;
         setIsLoadingDetails(true);
+        setIsLoadingLyrics(true);
 
         fetchSongDetailedInfoApi(YOUTUBE_API_BASE, currentSong.id, isEncryptionEnabled)
             .then((info) => {
@@ -176,10 +188,62 @@ const Player: React.FC<PlayerProps> = ({
                 }
             });
 
+        fetchSongLyricsApi(
+            YOUTUBE_API_BASE,
+            {
+                id: currentSong.id,
+                title: currentSong.title,
+                author: currentSong.author,
+                duration: currentSong.duration || duration
+            },
+            isEncryptionEnabled
+        )
+            .then((lyricsData) => {
+                if (!cancelled) {
+                    setSongLyrics(lyricsData);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setIsLoadingLyrics(false);
+                }
+            });
+
         return () => {
             cancelled = true;
         };
     }, [isExpanded, currentSong?.id, isEncryptionEnabled]);
+
+    // חישוב אינדקס השורה המתנגנת כרגע במילים מסונכרנות
+    const activeLyricIndex = useMemo(() => {
+        if (!songLyrics?.isSynced || !songLyrics.syncedLines.length) return -1;
+        const lines = songLyrics.syncedLines;
+        let idx = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (currentTime + 0.25 >= lines[i].time) {
+                idx = i;
+            } else {
+                break;
+            }
+        }
+        return idx;
+    }, [songLyrics, currentTime]);
+
+    // גלילה אוטומטית חלקה אל השורה המתנגנת כעת בטאב המילים
+    useEffect(() => {
+        if (
+            isExpanded &&
+            activeRightTab === 'lyrics' &&
+            autoScrollLyrics &&
+            activeLyricIndex >= 0 &&
+            activeLyricLineRef.current
+        ) {
+            activeLyricLineRef.current.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center'
+            });
+        }
+    }, [isExpanded, activeRightTab, autoScrollLyrics, activeLyricIndex]);
 
     useEffect(() => {
         const timeListener = audioService.addListener('timeUpdate', (data: any) => {
@@ -454,28 +518,160 @@ const Player: React.FC<PlayerProps> = ({
                         </div>
                     </div>
 
-                    {/* צד ימין: כל המידע, הקרדיטים, הסטטיסטיקות והנתונים הטכניים מ-YouTube Music */}
+                    {/* צד ימין: טאבים של מידע וקרדיטים + מילות השיר (YouTube Music & LRCLIB) */}
                     <div
                         className="w-full md:w-[56%] lg:w-[58%] flex-1 md:overflow-y-auto no-scrollbar p-5 md:p-8 space-y-5 pb-12"
                         dir="rtl"
                     >
-                        <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                            <div>
-                                <h3 className="text-lg md:text-xl font-bold text-white">
-                                    על השיר • YouTube Music
-                                </h3>
-                                <p className="text-xs text-gray-400 mt-0.5">
-                                    קרדיטים, נתוני השמעה ופרטים טכניים
-                                </p>
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
+                            <div className="flex items-center gap-2 bg-white/5 p-1 rounded-full border border-white/10">
+                                <button
+                                    onClick={() => setActiveRightTab('info')}
+                                    className={`px-4 py-1.5 rounded-full text-xs md:text-sm font-bold transition-all ${
+                                        activeRightTab === 'info'
+                                            ? 'bg-spotify-primary text-black shadow-md'
+                                            : 'text-gray-300 hover:text-white'
+                                    }`}
+                                >
+                                    פרטים וקרדיטים
+                                </button>
+                                <button
+                                    onClick={() => setActiveRightTab('lyrics')}
+                                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs md:text-sm font-bold transition-all ${
+                                        activeRightTab === 'lyrics'
+                                            ? 'bg-spotify-primary text-black shadow-md'
+                                            : 'text-gray-300 hover:text-white'
+                                    }`}
+                                >
+                                    <span>מילים</span>
+                                    {songLyrics?.isSynced && (
+                                        <span
+                                            className={`text-[10px] px-1.5 py-0.5 rounded-full font-extrabold ${
+                                                activeRightTab === 'lyrics'
+                                                    ? 'bg-black/20 text-black'
+                                                    : 'bg-spotify-primary/20 text-spotify-primary'
+                                            }`}
+                                        >
+                                            מסונכרן
+                                        </span>
+                                    )}
+                                </button>
                             </div>
-                            {isLoadingDetails && !songDetails && (
+
+                            {activeRightTab === 'info' && isLoadingDetails && !songDetails && (
                                 <span className="text-xs font-semibold text-spotify-primary animate-pulse bg-spotify-primary/10 px-3 py-1 rounded-full">
                                     טוען פרטים...
                                 </span>
                             )}
+
+                            {activeRightTab === 'lyrics' && (
+                                <div className="flex items-center gap-2">
+                                    {songLyrics?.isSynced && (
+                                        <button
+                                            onClick={() => setAutoScrollLyrics((v) => !v)}
+                                            className={`text-xs font-bold px-3 py-1 rounded-full border transition ${
+                                                autoScrollLyrics
+                                                    ? 'bg-spotify-primary/20 border-spotify-primary text-spotify-primary'
+                                                    : 'bg-white/5 border-white/15 text-gray-300 hover:text-white'
+                                            }`}
+                                        >
+                                            {autoScrollLyrics ? 'גלילה אוטומטית: פעיל' : 'גלילה ידנית'}
+                                        </button>
+                                    )}
+                                    {songLyrics?.hasLyrics && songLyrics.plainLyrics && (
+                                        <button
+                                            onClick={() => {
+                                                navigator.clipboard?.writeText(songLyrics.plainLyrics);
+                                                setCopiedLyrics(true);
+                                                setTimeout(() => setCopiedLyrics(false), 2000);
+                                            }}
+                                            className="flex items-center gap-1 text-xs font-bold px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 text-gray-200 transition"
+                                            title="העתק מילים"
+                                        >
+                                            <CopyIcon className="w-3.5 h-3.5" />
+                                            <span>{copiedLyrics ? 'הועתק!' : 'העתק'}</span>
+                                        </button>
+                                    )}
+                                </div>
+                            )}
                         </div>
 
-                        {/* כרטיסיות סטטיסטיקה ודירוגים */}
+                        {activeRightTab === 'lyrics' ? (
+                            <div className="space-y-4">
+                                {isLoadingLyrics && !songLyrics ? (
+                                    <div className="flex flex-col items-center justify-center py-16 gap-3">
+                                        <LoaderIcon className="w-9 h-9 animate-spin text-spotify-primary" />
+                                        <span className="text-sm text-gray-400">
+                                            מחפש את מילות השיר...
+                                        </span>
+                                    </div>
+                                ) : songLyrics?.hasLyrics ? (
+                                    <div className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 md:p-6">
+                                        {songLyrics.source && (
+                                            <div className="text-[11px] text-gray-400 mb-4 pb-2 border-b border-white/5 flex justify-between items-center">
+                                                <span>מקור: {songLyrics.source}</span>
+                                                {songLyrics.isSynced && (
+                                                    <span className="text-spotify-primary font-semibold">
+                                                        לחץ על שורה כדי לקפוץ אליה בשיר
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {songLyrics.isSynced && songLyrics.syncedLines.length > 0 ? (
+                                            <div className="space-y-2.5">
+                                                {songLyrics.syncedLines.map((line, idx) => {
+                                                    const isCurrentLine = idx === activeLyricIndex;
+                                                    const isPastLine =
+                                                        activeLyricIndex >= 0 && idx < activeLyricIndex;
+
+                                                    return (
+                                                        <button
+                                                            key={`${line.time}-${idx}`}
+                                                            ref={
+                                                                isCurrentLine
+                                                                    ? activeLyricLineRef
+                                                                    : undefined
+                                                            }
+                                                            onClick={() => handleSeekInput(line.time)}
+                                                            dir="auto"
+                                                            className={`w-full text-start px-3 py-2 rounded-xl transition-all duration-200 block ${
+                                                                isCurrentLine
+                                                                    ? 'text-white font-black text-xl md:text-2xl bg-spotify-primary/15 border border-spotify-primary/30 shadow-md'
+                                                                    : isPastLine
+                                                                    ? 'text-gray-500 hover:text-gray-300 text-base md:text-lg font-semibold hover:bg-white/5'
+                                                                    : 'text-gray-300 hover:text-white text-base md:text-lg font-semibold hover:bg-white/5'
+                                                            }`}
+                                                        >
+                                                            {line.text}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <p
+                                                dir="auto"
+                                                className="text-base md:text-lg text-gray-100 whitespace-pre-line leading-loose font-medium"
+                                            >
+                                                {songLyrics.plainLyrics}
+                                            </p>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="bg-white/5 border border-white/10 rounded-2xl p-8 text-center space-y-2">
+                                        <MusicIcon className="w-10 h-10 text-gray-500 mx-auto" />
+                                        <div className="text-base font-bold text-gray-300">
+                                            לא נמצאו מילים עבור שיר זה
+                                        </div>
+                                        <p className="text-xs text-gray-500">
+                                            ייתכן שמדובר בקטע אינסטרומנטלי או שהמילים טרם הוזנו במאגרי YouTube Music ו-LRCLIB.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <>
+                                {/* כרטיסיות סטטיסטיקה ודירוגים */}
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                             <div className="bg-white/5 border border-white/10 rounded-xl p-3.5">
                                 <div className="text-[11px] text-gray-400 mb-1">צפיות</div>
@@ -620,6 +816,8 @@ const Player: React.FC<PlayerProps> = ({
                                     {songDetails.description}
                                 </p>
                             </div>
+                        )}
+                            </>
                         )}
                     </div>
                 </div>

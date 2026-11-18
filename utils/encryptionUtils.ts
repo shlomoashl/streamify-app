@@ -1,15 +1,16 @@
 import { storageService } from '../StorageService';
-import { SongDetailedInfo, YouTubeSearchResult } from '../types';
+import { SongDetailedInfo, SongLyricsData, YouTubeSearchResult } from '../types';
 
 export const ENCRYPTION_STORAGE_KEY = 'streamify_encryption_enabled';
 const ENCRYPTION_KEY_STR = 'efitoyb';
 const ENCRYPTION_KEY_BYTES = new TextEncoder().encode(ENCRYPTION_KEY_STR);
 const IMAGE_XOR_KEY = 0x77;
 
-// זיכרון מטמון לתמונות מפוענחות (Blob URLs) ולמידע על שירים כדי לא להוריד פעמיים
+// זיכרון מטמון לתמונות מפוענחות (Blob URLs), למידע על שירים ולמילות שירים
 const decryptedImageCache = new Map<string, string>();
 const pendingImageLoads = new Map<string, Promise<string>>();
 const songDetailedInfoCache = new Map<string, SongDetailedInfo>();
+const songLyricsCache = new Map<string, SongLyricsData>();
 
 /**
  * קריאה סינכרונית מהירה של מצב ההצפנה (ברירת מחדל: true - מוצפן)
@@ -335,6 +336,70 @@ export const fetchSongDetailedInfoApi = async (
         return rawInfo as SongDetailedInfo;
     } catch (e) {
         console.warn('[SongInfo] Failed to fetch song detailed info:', e);
+        return null;
+    }
+};
+
+/**
+ * משיכה מהירה של מילות השיר (YouTube Music + LRCLIB מסונכרן) לפי המסלול הפעיל
+ */
+export const fetchSongLyricsApi = async (
+    apiBaseUrl: string,
+    song: { id: string; title?: string; author?: string; duration?: number },
+    encryptionEnabled: boolean
+): Promise<SongLyricsData | null> => {
+    if (!song?.id) return null;
+    const cached = songLyricsCache.get(song.id);
+    if (cached) return cached;
+
+    try {
+        const cleanBase = apiBaseUrl.replace(/\/$/, '');
+        const params = new URLSearchParams({
+            use_underscore: encryptionEnabled ? 'true' : 'false',
+            enc: encryptionEnabled ? '1' : '0',
+            title: encryptionEnabled ? encryptText(song.title || '') : song.title || '',
+            artist: encryptionEnabled ? encryptText(song.author || '') : song.author || '',
+            duration: String(Math.round(song.duration || 0))
+        });
+
+        const res = await fetch(`${cleanBase}/lyrics/${song.id}?${params.toString()}`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data || !data.success || !data.lyrics) return null;
+
+        const raw = { ...data.lyrics };
+        const shouldDecrypt = encryptionEnabled || Boolean(data.encrypted);
+
+        if (shouldDecrypt) {
+            if (raw.plainLyrics && typeof raw.plainLyrics === 'string') {
+                raw.plainLyrics = decryptText(raw.plainLyrics);
+            }
+            if (raw.source && typeof raw.source === 'string') {
+                raw.source = decryptText(raw.source);
+            }
+            if (Array.isArray(raw.syncedLines)) {
+                raw.syncedLines = raw.syncedLines.map((line: any) => ({
+                    time: Number(line.time || 0),
+                    text: typeof line.text === 'string' ? decryptText(line.text) : ''
+                }));
+            }
+        }
+
+        const parsed: SongLyricsData = {
+            id: song.id,
+            hasLyrics: Boolean(raw.hasLyrics),
+            isSynced: Boolean(raw.isSynced && Array.isArray(raw.syncedLines) && raw.syncedLines.length > 0),
+            plainLyrics: raw.plainLyrics || '',
+            syncedLines: Array.isArray(raw.syncedLines) ? raw.syncedLines : [],
+            source: raw.source || ''
+        };
+
+        if (parsed.hasLyrics) {
+            songLyricsCache.set(song.id, parsed);
+        }
+        return parsed;
+    } catch (e) {
+        console.warn('[Lyrics] Failed to fetch song lyrics:', e);
         return null;
     }
 };
