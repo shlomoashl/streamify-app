@@ -5,7 +5,7 @@ import { Network } from '@capacitor/network';
 import { Playlist, PlaylistItem, PlayerState, User } from '../types';
 import { audioService } from '../AudioService';
 import { storageService } from '../StorageService';
-import { shuffleArray } from '../utils/mediaUtils';
+import { recordPlayedSongId, shuffleArray } from '../utils/mediaUtils';
 
 export const usePlayerController = (params: {
     currentUser: User | null;
@@ -369,18 +369,16 @@ export const usePlayerController = (params: {
         let finalIndex = index;
         let finalOriginalQueue: PlaylistItem[] | undefined = undefined;
 
-        if (playerState.isShuffled || (isPlaylistStartAction && playerState.isShuffled)) {
+        if (playerState.isShuffled) {
             finalOriginalQueue = [...queue];
-            const shuffledQueue = shuffleArray([...queue]);
-            const clickedSongIdx = shuffledQueue.findIndex((s) => s.id === song.id);
-            if (clickedSongIdx > 0) {
-                const [item] = shuffledQueue.splice(clickedSongIdx, 1);
-                shuffledQueue.unshift(item);
-            }
-            finalQueue = shuffledQueue;
+            finalQueue = isPlaylistStartAction
+                ? shuffleArray([...queue])
+                : shuffleArray([...queue], song.id);
+            song = finalQueue[0] || song;
             finalIndex = 0;
         }
 
+        recordPlayedSongId(song.id);
         lastSavedSongIdRef.current = song.id;
         setPlayingPlaylistId(playlistId);
         setPlayerState((prev) => {
@@ -421,12 +419,22 @@ export const usePlayerController = (params: {
         setInitialSavedTime(0);
         setPlayerState((prev) => {
             if (!prev.queue || prev.queue.length === 0) return prev;
+            const atEndOfShuffledQueue =
+                prev.isShuffled && prev.queue.length > 2 && prev.currentIndex >= prev.queue.length - 1;
+            if (atEndOfShuffledQueue) {
+                const freshQueue = shuffleArray(prev.originalQueue || prev.queue);
+                const firstSong = freshQueue[0];
+                recordPlayedSongId(firstSong.id);
+                audioService.playQueue(freshQueue, 0, playingPlaylistId || undefined, 0, true);
+                return { ...prev, queue: freshQueue, currentIndex: 0, currentSong: firstSong, isPlaying: true };
+            }
             const nextIdx = (prev.currentIndex + 1) % prev.queue.length;
             const nextSong = prev.queue[nextIdx];
+            recordPlayedSongId(nextSong.id);
             audioService.skipTo(nextIdx);
             return { ...prev, currentIndex: nextIdx, currentSong: nextSong, isPlaying: true };
         });
-    }, []);
+    }, [playingPlaylistId]);
 
     const handlePrev = useCallback(() => {
         audioInitializedRef.current = true;
@@ -437,6 +445,7 @@ export const usePlayerController = (params: {
             if (!prev.queue || prev.queue.length === 0) return prev;
             const prevIdx = (prev.currentIndex - 1 + prev.queue.length) % prev.queue.length;
             const prevSong = prev.queue[prevIdx];
+            recordPlayedSongId(prevSong.id);
             audioService.skipTo(prevIdx);
             return { ...prev, currentIndex: prevIdx, currentSong: prevSong, isPlaying: true };
         });
@@ -455,14 +464,7 @@ export const usePlayerController = (params: {
 
             if (isEnablingShuffle) {
                 const originalQueue = prev.originalQueue || prev.queue;
-                const shuffledQueue = shuffleArray([...originalQueue]);
-                const newIndex = shuffledQueue.findIndex(
-                    (s) => s.id === prev.currentSong!.id
-                );
-                if (newIndex > 0) {
-                    const current = shuffledQueue.splice(newIndex, 1)[0];
-                    shuffledQueue.unshift(current);
-                }
+                const shuffledQueue = shuffleArray([...originalQueue], prev.currentSong.id);
                 newState = {
                     ...prev,
                     isShuffled: true,
@@ -633,6 +635,7 @@ export const usePlayerController = (params: {
                         currentTimeRef.current = 0;
                         initialSeekTimeRef.current = 0;
                         setInitialSavedTime(0);
+                        recordPlayedSongId(newSong.id);
                     }
                     const nextState = {
                         ...prev,

@@ -492,8 +492,7 @@ const App: React.FC = () => {
         }
         if (playlist.songs.length > 0) {
             setPlayingPlaylistTitle(playlist.name);
-            const startIdx = playerState.isShuffled ? Math.floor(Math.random() * playlist.songs.length) : 0;
-            handlePlaySong(playlist.songs[startIdx], playlist.songs, startIdx, true, playlist.id);
+            handlePlaySong(playlist.songs[0], playlist.songs, 0, true, playlist.id);
         }
     };
 
