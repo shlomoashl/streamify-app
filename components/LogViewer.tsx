@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { logger, LogEntry } from '../Logger';
 import { YOUTUBE_API_BASE } from '../constants';
 import { decryptText, encryptText } from '../utils/encryptionUtils';
@@ -364,11 +365,17 @@ const LogViewer: React.FC<LogViewerProps> = ({ isEncryptionEnabled, onClose }) =
         } catch {}
     };
 
+    const isDesktop = !Capacitor.isNativePlatform();
+
     return (
-        <div className="fixed inset-0 bg-black/95 z-[150] flex flex-col font-mono text-sm">
-            {/* סרגל עליון */}
+        <div
+            className={`fixed inset-x-0 bottom-0 ${
+                isDesktop ? 'top-8' : 'top-0'
+            } bg-[#0c0c0c] z-[150] flex flex-col font-mono text-sm overflow-hidden`}
+        >
+            {/* סרגל עליון - ממוקם נקי מתחת ל-TitleBar במחשב ועם safe-area באנדרואיד */}
             <div
-                className="flex flex-wrap items-center justify-between gap-2 p-3 bg-neutral-900 border-b border-white/10"
+                className="flex-shrink-0 flex flex-wrap items-center justify-between gap-2 px-4 py-3 pt-[max(1rem,env(safe-area-inset-top))] md:pt-3 bg-neutral-900 border-b border-white/10"
                 dir="rtl"
             >
                 <div className="flex items-center gap-2 flex-wrap">
