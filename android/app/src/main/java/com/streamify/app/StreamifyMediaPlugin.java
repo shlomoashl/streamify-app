@@ -13,6 +13,7 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
 
+import androidx.activity.result.ActivityResult;
 import androidx.annotation.OptIn;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
@@ -31,6 +32,7 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.google.common.util.concurrent.ListenableFuture;
 
@@ -69,10 +71,13 @@ class PluginEvents {
 @CapacitorPlugin(name = "StreamifyMedia")
 public class StreamifyMediaPlugin extends Plugin {
     private static final String TAG = "StreamifyMedia";
+    private static final String UPDATER_PREFS = "streamify_updater_prefs";
+    private static final String KEY_LAST_APK_KEY = "last_apk_key";
 
     private MediaController controller;
     private ListenableFuture<MediaController> controllerFuture;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private volatile PluginCall pendingInstallPermissionCall;
 
     private boolean isSeeking = false;
     private boolean isProgressRunning = false;
@@ -130,6 +135,29 @@ public class StreamifyMediaPlugin extends Plugin {
         });
 
         connectController(context);
+        cleanupStaleDownloadedApk(context);
+    }
+
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        final PluginCall waitingCall = pendingInstallPermissionCall;
+        if (waitingCall != null) {
+            handler.postDelayed(() -> {
+                if (pendingInstallPermissionCall == waitingCall) {
+                    pendingInstallPermissionCall = null;
+                    Context context = getContext();
+                    boolean granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+                            || context.getPackageManager().canRequestPackageInstalls();
+                    if (granted) {
+                        notifyUpdaterEvent("apkPermissionGranted", 1);
+                        proceedWithApkDownloadAndInstall(waitingCall);
+                    } else {
+                        waitingCall.reject("לא אושרה הרשאת 'התקנת אפליקציות ממקור זה' בהגדרות. יש לאשר את ההרשאה כדי להמשיך בעדכון.");
+                    }
+                }
+            }, 450);
+        }
     }
 
     private void connectController(Context context) {
@@ -757,8 +785,94 @@ public class StreamifyMediaPlugin extends Plugin {
         }
     }
 
+    private void notifyUpdaterEvent(String action, int value) {
+        handler.post(() -> {
+            JSObject evt = new JSObject();
+            evt.put("action", action);
+            evt.put("value", value);
+            notifyListeners("onMediaEvent", evt);
+        });
+    }
+
+    private void cleanupStaleDownloadedApk(Context context) {
+        try {
+            File apkFile = new File(context.getCacheDir(), "streamify-update.apk");
+            if (!apkFile.exists()) return;
+
+            PackageInfo pkgInfo = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+            long ageMs = System.currentTimeMillis() - apkFile.lastModified();
+            // מוחק אוטומטית את קובץ ההתקנה לאחר שהאפליקציה עודכנה בפועל או אם הקובץ ישן מעל 12 שעות
+            if (pkgInfo.lastUpdateTime > apkFile.lastModified() || ageMs > 12L * 60L * 60L * 1000L) {
+                apkFile.delete();
+                context.getSharedPreferences(UPDATER_PREFS, Context.MODE_PRIVATE)
+                        .edit()
+                        .remove(KEY_LAST_APK_KEY)
+                        .apply();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "cleanupStaleDownloadedApk warning", e);
+        }
+    }
+
+    @PluginMethod
+    public void canRequestPackageInstalls(PluginCall call) {
+        boolean granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+                || getContext().getPackageManager().canRequestPackageInstalls();
+        JSObject ret = new JSObject();
+        ret.put("granted", granted);
+        call.resolve(ret);
+    }
+
+    private void requestInstallPermissionAndWait(PluginCall call) {
+        notifyUpdaterEvent("apkPermissionNeeded", 1);
+        pendingInstallPermissionCall = call;
+        try {
+            Intent settingsIntent = new Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getContext().getPackageName())
+            );
+            startActivityForResult(call, settingsIntent, "handleInstallPermissionResult");
+        } catch (Exception e) {
+            pendingInstallPermissionCall = null;
+            call.reject("לא ניתן לפתוח את מסך ההגדרות לאישור ההתקנה: " + e.getMessage());
+        }
+    }
+
+    @ActivityCallback
+    public void handleInstallPermissionResult(PluginCall call, ActivityResult result) {
+        pendingInstallPermissionCall = null;
+        if (call == null) return;
+        handler.postDelayed(() -> {
+            Context context = getContext();
+            boolean granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+                    || context.getPackageManager().canRequestPackageInstalls();
+            if (granted) {
+                notifyUpdaterEvent("apkPermissionGranted", 1);
+                proceedWithApkDownloadAndInstall(call);
+            } else {
+                call.reject("לא אושרה הרשאת 'התקנת אפליקציות ממקור זה' בהגדרות. יש לאשר את ההרשאה כדי להמשיך בעדכון.");
+            }
+        }, 250);
+    }
+
     @PluginMethod
     public void downloadAndInstallApk(PluginCall call) {
+        final String primaryUrl = call.getString("url");
+        if (primaryUrl == null || primaryUrl.isEmpty()) {
+            call.reject("Missing APK download URL");
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && !getContext().getPackageManager().canRequestPackageInstalls()) {
+            requestInstallPermissionAndWait(call);
+            return;
+        }
+
+        proceedWithApkDownloadAndInstall(call);
+    }
+
+    private void proceedWithApkDownloadAndInstall(PluginCall call) {
         final String primaryUrl = call.getString("url");
         final String fallbackUrl = call.getString("fallbackUrl");
         if (primaryUrl == null || primaryUrl.isEmpty()) {
@@ -769,42 +883,54 @@ public class StreamifyMediaPlugin extends Plugin {
         new Thread(() -> {
             Context context = getContext();
             File apkFile = new File(context.getCacheDir(), "streamify-update.apk");
-            if (apkFile.exists()) {
-                apkFile.delete();
-            }
+            String cacheKey = (fallbackUrl != null && !fallbackUrl.isEmpty())
+                    ? fallbackUrl
+                    : primaryUrl.replaceAll("[?&]t=\\d+", "");
 
-            boolean downloaded = downloadFileWithProgress(primaryUrl, apkFile);
-            if (!downloaded && fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackUrl.equals(primaryUrl)) {
-                Log.w(TAG, "Primary APK download failed, trying fallback URL: " + fallbackUrl);
-                if (apkFile.exists()) apkFile.delete();
-                downloaded = downloadFileWithProgress(fallbackUrl, apkFile);
-            }
+            SharedPreferences prefs = context.getSharedPreferences(UPDATER_PREFS, Context.MODE_PRIVATE);
+            String savedKey = prefs.getString(KEY_LAST_APK_KEY, "");
+            long ageMs = apkFile.exists() ? (System.currentTimeMillis() - apkFile.lastModified()) : Long.MAX_VALUE;
 
-            if (!downloaded || !apkFile.exists() || apkFile.length() < 100000) {
-                call.reject("הורדת קובץ העדכון נכשלה");
-                return;
+            boolean alreadyCachedValid = apkFile.exists()
+                    && apkFile.length() > 100000
+                    && cacheKey.equals(savedKey)
+                    && ageMs < 15L * 60L * 1000L;
+
+            if (alreadyCachedValid) {
+                notifyUpdaterEvent("apkDownloadProgress", 100);
+            } else {
+                if (apkFile.exists()) {
+                    apkFile.delete();
+                }
+
+                boolean downloaded = downloadFileWithProgress(primaryUrl, apkFile);
+                if (!downloaded && fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackUrl.equals(primaryUrl)) {
+                    Log.w(TAG, "Primary APK download failed, trying fallback URL: " + fallbackUrl);
+                    if (apkFile.exists()) apkFile.delete();
+                    downloaded = downloadFileWithProgress(fallbackUrl, apkFile);
+                }
+
+                if (!downloaded || !apkFile.exists() || apkFile.length() < 100000) {
+                    call.reject("הורדת קובץ העדכון נכשלה");
+                    return;
+                }
+
+                prefs.edit().putString(KEY_LAST_APK_KEY, cacheKey).apply();
             }
 
             handler.post(() -> {
                 try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                            && !context.getPackageManager().canRequestPackageInstalls()) {
+                        requestInstallPermissionAndWait(call);
+                        return;
+                    }
+
                     Uri apkUri = FileProvider.getUriForFile(
                             context,
                             context.getPackageName() + ".fileprovider",
                             apkFile
                     );
-
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        if (!context.getPackageManager().canRequestPackageInstalls()) {
-                            Intent settingsIntent = new Intent(
-                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                    Uri.parse("package:" + context.getPackageName())
-                            );
-                            settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                            context.startActivity(settingsIntent);
-                            call.reject("יש לאשר התקנת אפליקציות ממקור זה בהגדרות שנפתחו, ולאחר מכן ללחוץ שוב על כפתור העדכון");
-                            return;
-                        }
-                    }
 
                     Intent installIntent = new Intent(Intent.ACTION_VIEW);
                     installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");

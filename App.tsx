@@ -46,6 +46,7 @@ import { PlaylistDetailView } from './components/views/PlaylistDetailView';
 import {
     checkAndroidUpdateAvailabilitySilently,
     checkInitialUpdateState,
+    resumePendingApkInstallIfReady,
     runInteractiveUpdateCheck
 } from './services/UpdateService';
 import { usePlayerController } from './hooks/usePlayerController';
@@ -385,7 +386,15 @@ const App: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        if (isAppReady) checkAndroidUpdateAvailabilitySilently(setUpdateAvailable);
+        if (isAppReady) {
+            checkAndroidUpdateAvailabilitySilently(setUpdateAvailable);
+            void resumePendingApkInstallIfReady({
+                setGlobalLoading,
+                setUpdateStatusMsg,
+                setUpdateAvailable,
+                setConfirmModal
+            });
+        }
     }, [isAppReady]);
 
     useEffect(() => {

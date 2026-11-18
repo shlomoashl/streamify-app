@@ -232,6 +232,109 @@ export const checkInitialUpdateState = (setUpdateAvailable: (val: boolean) => vo
     }
 };
 
+const PENDING_APK_RESUME_KEY = 'streamify_apk_resume_pending';
+
+interface InteractiveCallbacks {
+    setGlobalLoading: (msg: string | null) => void;
+    setUpdateStatusMsg: (msg: string) => void;
+    setUpdateAvailable: (val: boolean) => void;
+    setConfirmModal: React.Dispatch<React.SetStateAction<ConfirmModalState>>;
+}
+
+const executeApkDownloadAndInstall = async (
+    releaseInfo: LatestReleaseInfo,
+    callbacks: InteractiveCallbacks
+) => {
+    const { setGlobalLoading, setUpdateStatusMsg, setUpdateAvailable, setConfirmModal } = callbacks;
+    const cleanBase = YOUTUBE_API_BASE.replace(/\/$/, '');
+
+    setGlobalLoading('מוריד קובץ עדכון מערכת (APK)...');
+    setUpdateStatusMsg('מתחבר לשרת העדכונים (0%)...');
+
+    let progressHandle: { remove: () => Promise<void> } | null = null;
+    try {
+        progressHandle = await StreamifyMedia.addListener('onMediaEvent', (evt: any) => {
+            if (evt?.action === 'apkDownloadProgress') {
+                setUpdateStatusMsg(`מוריד קובץ עדכון מערכת: ${evt.value}%`);
+            } else if (evt?.action === 'apkPermissionNeeded') {
+                // שומרים חותמת זמן למקרה שאנדרואיד יאתחל את תהליך האפליקציה בזמן אישור ההרשאה בהגדרות
+                localStorage.setItem(PENDING_APK_RESUME_KEY, String(Date.now()));
+                setGlobalLoading('ממתין לאישור התקנה בהגדרות אנדרואיד...');
+                setUpdateStatusMsg('יש לאשר "התקנת אפליקציות לא מוכרות" בהגדרות ולחזור — ההתקנה תמשיך אוטומטית');
+            } else if (evt?.action === 'apkPermissionGranted') {
+                localStorage.removeItem(PENDING_APK_RESUME_KEY);
+                setGlobalLoading('מוריד קובץ עדכון מערכת (APK)...');
+                setUpdateStatusMsg('ההרשאה אושרה! ממשיך בהורדת העדכון...');
+            }
+        });
+
+        const serverProxyApkUrl = `${cleanBase}/app-update-download?type=apk&t=${Date.now()}`;
+        await StreamifyMedia.downloadAndInstallApk({
+            url: serverProxyApkUrl,
+            fallbackUrl: releaseInfo.apkDownloadUrl || ''
+        });
+
+        localStorage.removeItem(PENDING_APK_RESUME_KEY);
+        const serverDate = releaseInfo.apkUpdatedAt
+            ? new Date(releaseInfo.apkUpdatedAt).getTime()
+            : Date.now();
+        localStorage.setItem('streamify_app_version_date', serverDate.toString());
+        setUpdateAvailable(false);
+        setGlobalLoading(null);
+        setUpdateStatusMsg('');
+    } catch (apkErr: any) {
+        localStorage.removeItem(PENDING_APK_RESUME_KEY);
+        setGlobalLoading(null);
+        setUpdateStatusMsg('');
+        setConfirmModal({
+            isOpen: true,
+            title: 'שגיאה בהורדת עדכון המערכת',
+            message: apkErr?.message || 'לא הצלחנו להוריד את קובץ העדכון.',
+            onConfirm: () => setConfirmModal((prev) => ({ ...prev, isOpen: false })),
+            isAlertOnly: true
+        });
+    } finally {
+        if (progressHandle) {
+            progressHandle.remove().catch(() => {});
+        }
+    }
+};
+
+export const resumePendingApkInstallIfReady = async (callbacks: InteractiveCallbacks) => {
+    if (!Capacitor.isNativePlatform()) return;
+    try {
+        const rawTs = localStorage.getItem(PENDING_APK_RESUME_KEY);
+        if (!rawTs) return;
+        const ts = Number(rawTs);
+        // תקף ל-5 דקות בלבד — למקרה שמערכת אנדרואיד הפעילה מחדש את התהליך בזמן מתן ההרשאה
+        if (!ts || Date.now() - ts > 5 * 60 * 1000) {
+            localStorage.removeItem(PENDING_APK_RESUME_KEY);
+            return;
+        }
+
+        const perm = await StreamifyMedia.canRequestPackageInstalls().catch(() => ({ granted: false }));
+        if (!perm?.granted) {
+            localStorage.removeItem(PENDING_APK_RESUME_KEY);
+            return;
+        }
+
+        localStorage.removeItem(PENDING_APK_RESUME_KEY);
+        const [releaseInfo, localState] = await Promise.all([
+            fetchLatestReleaseMetadata(true),
+            getEffectiveAndroidState()
+        ]);
+        if (!releaseInfo) return;
+
+        const { hasUpdate, requiresFullApk } = evaluateAndroidUpdateNeed(releaseInfo, localState);
+        if (hasUpdate && requiresFullApk) {
+            await executeApkDownloadAndInstall(releaseInfo, callbacks);
+        }
+    } catch (e) {
+        localStorage.removeItem(PENDING_APK_RESUME_KEY);
+        console.warn('[UpdateService] resumePendingApkInstallIfReady warning:', e);
+    }
+};
+
 export const checkAndroidUpdateAvailabilitySilently = async (
     setUpdateAvailable: (val: boolean) => void
 ) => {
@@ -347,51 +450,9 @@ export const runInteractiveUpdateCheck = async (callbacks: {
                 title: `עדכון מערכת מלא זמין (${tagName})`,
                 message:
                     'עדכון זה כולל שדרוג לרכיבי הנגן המובנים והפלאגינים באנדרואיד (התקנת APK). האם להוריד ולהתקין כעת (ללא מחיקת נתונים)?',
-                onConfirm: async () => {
+                onConfirm: () => {
                     setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-                    setGlobalLoading('מוריד קובץ עדכון מערכת (APK)...');
-                    setUpdateStatusMsg('מתחבר לשרת העדכונים (0%)...');
-
-                    let progressHandle: { remove: () => Promise<void> } | null = null;
-                    try {
-                        progressHandle = await StreamifyMedia.addListener(
-                            'onMediaEvent',
-                            (evt: any) => {
-                                if (evt?.action === 'apkDownloadProgress') {
-                                    setUpdateStatusMsg(`מוריד קובץ עדכון מערכת: ${evt.value}%`);
-                                }
-                            }
-                        );
-
-                        const serverProxyApkUrl = `${cleanBase}/app-update-download?type=apk&t=${Date.now()}`;
-                        await StreamifyMedia.downloadAndInstallApk({
-                            url: serverProxyApkUrl,
-                            fallbackUrl: releaseInfo.apkDownloadUrl || ''
-                        });
-
-                        const serverDate = releaseInfo.apkUpdatedAt
-                            ? new Date(releaseInfo.apkUpdatedAt).getTime()
-                            : Date.now();
-                        localStorage.setItem('streamify_app_version_date', serverDate.toString());
-                        setUpdateAvailable(false);
-                        setGlobalLoading(null);
-                        setUpdateStatusMsg('');
-                    } catch (apkErr: any) {
-                        setGlobalLoading(null);
-                        setUpdateStatusMsg('');
-                        setConfirmModal({
-                            isOpen: true,
-                            title: 'שגיאה בהורדת עדכון המערכת',
-                            message: apkErr?.message || 'לא הצלחנו להוריד את קובץ העדכון.',
-                            onConfirm: () =>
-                                setConfirmModal((prev) => ({ ...prev, isOpen: false })),
-                            isAlertOnly: true
-                        });
-                    } finally {
-                        if (progressHandle) {
-                            progressHandle.remove().catch(() => {});
-                        }
-                    }
+                    void executeApkDownloadAndInstall(releaseInfo, callbacks);
                 }
             });
             return;

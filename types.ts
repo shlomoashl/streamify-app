@@ -179,6 +179,7 @@ export interface StreamifyMediaPlugin {
     setEncryptionMode(options: { enabled: boolean }): Promise<{ enabled: boolean }>;
     getEncryptionMode(): Promise<{ enabled: boolean }>;
     getApkInfo(): Promise<ApkVersionInfo>;
+    canRequestPackageInstalls(): Promise<{ granted: boolean }>;
     downloadAndInstallApk(options: { url: string; fallbackUrl?: string }): Promise<{ success: boolean }>;
     getDuration(): Promise<{ value: number }>;
     getCurrentTime(): Promise<{ value: number }>;
