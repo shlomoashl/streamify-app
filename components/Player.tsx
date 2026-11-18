@@ -137,9 +137,7 @@ const Player: React.FC<PlayerProps> = ({
             setAutoScrollLyrics(true);
             setShowFullDescription(false);
             setIsDescriptionTruncated(false);
-            if (currentSong?.duration) {
-                setDuration(currentSong.duration);
-            }
+            setDuration(currentSong?.duration || 0);
         }
     }, [currentSong?.id, currentSong?.duration]);
 
@@ -194,7 +192,7 @@ const Player: React.FC<PlayerProps> = ({
                 id: currentSong.id,
                 title: currentSong.title,
                 author: currentSong.author,
-                duration: currentSong.duration || duration
+                duration: currentSong.duration || 0
             },
             isEncryptionEnabled
         )
