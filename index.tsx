@@ -4,6 +4,9 @@ import { Capacitor } from '@capacitor/core';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import App from './App';
 import './index.css';
+import { logger } from './Logger';
+
+logger.init();
 
 const rootElement = document.getElementById('root');
 

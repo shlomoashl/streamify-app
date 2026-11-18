@@ -49,6 +49,16 @@ class LogManager {
             this.originalConsole.error(...args);
         };
 
+        if (typeof window !== 'undefined') {
+            window.addEventListener('error', (event) => {
+                this.addLog('error', `[Uncaught] ${event.message || 'Runtime error'}`);
+            });
+            window.addEventListener('unhandledrejection', (event) => {
+                const reason = event.reason instanceof Error ? event.reason.message : formatArgs([event.reason]);
+                this.addLog('error', `[UnhandledPromise] ${reason}`);
+            });
+        }
+
         this.isInitialized = true;
         this.addLog('info', 'Logger initialized successfully');
     }
