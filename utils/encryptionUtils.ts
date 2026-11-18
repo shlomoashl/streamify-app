@@ -346,7 +346,8 @@ export const fetchSongDetailedInfoApi = async (
 export const fetchSongLyricsApi = async (
     apiBaseUrl: string,
     song: { id: string; title?: string; author?: string; duration?: number },
-    encryptionEnabled: boolean
+    encryptionEnabled: boolean,
+    includeYoutube: boolean = true
 ): Promise<SongLyricsData | null> => {
     if (!song?.id) return null;
     const cached = songLyricsCache.get(song.id);
@@ -357,6 +358,7 @@ export const fetchSongLyricsApi = async (
         const params = new URLSearchParams({
             use_underscore: encryptionEnabled ? 'true' : 'false',
             enc: encryptionEnabled ? '1' : '0',
+            include_youtube: includeYoutube ? '1' : '0',
             title: encryptionEnabled ? encryptText(song.title || '') : song.title || '',
             artist: encryptionEnabled ? encryptText(song.author || '') : song.author || '',
             duration: String(Math.round(song.duration || 0))

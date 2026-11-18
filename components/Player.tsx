@@ -120,6 +120,8 @@ const Player: React.FC<PlayerProps> = ({
     const [isDescriptionTruncated, setIsDescriptionTruncated] = useState(false);
     const descriptionRef = useRef<HTMLParagraphElement | null>(null);
     const activeLyricLineRef = useRef<HTMLButtonElement | null>(null);
+    const fastLyricsDoneSongRef = useRef<string | null>(null);
+    const fullLyricsDoneSongRef = useRef<string | null>(null);
 
     // סנכרון הזמן הראשוני שנשמר (למשל בעלייה מחדש במולטימדיה לרכב)
     useEffect(() => {
@@ -131,6 +133,8 @@ const Player: React.FC<PlayerProps> = ({
     useEffect(() => {
         if (currentSong?.id !== lastSongIdRef.current) {
             lastSongIdRef.current = currentSong?.id || null;
+            fastLyricsDoneSongRef.current = null;
+            fullLyricsDoneSongRef.current = null;
             setSongDetails(null);
             setSongLyrics(null);
             setCopiedLyrics(false);
@@ -164,12 +168,11 @@ const Player: React.FC<PlayerProps> = ({
         return () => cancelAnimationFrame(raf);
     }, [songDetails?.description, showFullDescription, isExpanded]);
 
-    // טעינה מהירה במקביל של מידע מפורט ומילות השיר מיוטיוב מיוזיק / LRCLIB רק כשמסך השיר המלא פתוח
+    // טעינת פרטי השיר והקרדיטים כשמסך השיר המלא פתוח
     useEffect(() => {
         if (!isExpanded || !currentSong?.id) return;
         let cancelled = false;
         setIsLoadingDetails(true);
-        setIsLoadingLyrics(true);
 
         fetchSongDetailedInfoApi(YOUTUBE_API_BASE, currentSong.id, isEncryptionEnabled)
             .then((info) => {
@@ -186,6 +189,35 @@ const Player: React.FC<PlayerProps> = ({
                 }
             });
 
+        return () => {
+            cancelled = true;
+        };
+    }, [isExpanded, currentSong?.id, isEncryptionEnabled]);
+
+    // מילות השיר: כשטאב המילים סגור מחפשים רק ב-LRCLIB (בלי להכביד על יוטיוב); בפתיחת טאב המילים מחפשים גם ביוטיוב
+    useEffect(() => {
+        if (!isExpanded || !currentSong?.id) return;
+        if (songLyrics?.id === currentSong.id && songLyrics.hasLyrics) {
+            setIsLoadingLyrics(false);
+            return;
+        }
+
+        const wantYoutube = activeRightTab === 'lyrics';
+        if (wantYoutube) {
+            if (fullLyricsDoneSongRef.current === currentSong.id) {
+                setIsLoadingLyrics(false);
+                return;
+            }
+        } else {
+            if (fastLyricsDoneSongRef.current === currentSong.id || fullLyricsDoneSongRef.current === currentSong.id) {
+                setIsLoadingLyrics(false);
+                return;
+            }
+        }
+
+        let cancelled = false;
+        setIsLoadingLyrics(true);
+
         fetchSongLyricsApi(
             YOUTUBE_API_BASE,
             {
@@ -194,10 +226,16 @@ const Player: React.FC<PlayerProps> = ({
                 author: currentSong.author,
                 duration: currentSong.duration || 0
             },
-            isEncryptionEnabled
+            isEncryptionEnabled,
+            wantYoutube
         )
             .then((lyricsData) => {
                 if (!cancelled) {
+                    if (wantYoutube) {
+                        fullLyricsDoneSongRef.current = currentSong.id;
+                    } else {
+                        fastLyricsDoneSongRef.current = currentSong.id;
+                    }
                     setSongLyrics(lyricsData);
                 }
             })
@@ -210,7 +248,7 @@ const Player: React.FC<PlayerProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [isExpanded, currentSong?.id, isEncryptionEnabled]);
+    }, [isExpanded, currentSong?.id, activeRightTab, isEncryptionEnabled, songLyrics?.id, songLyrics?.hasLyrics]);
 
     // חישוב אינדקס השורה המתנגנת כרגע במילים מסונכרנות
     const activeLyricIndex = useMemo(() => {
