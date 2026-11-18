@@ -504,8 +504,7 @@ const App: React.FC = () => {
         }
         if (result.type === 'spotify_playlist') return handleSpotifyImport(result.id);
 
-        setIsSearching(true);
-        setGlobalLoading('טוען...');
+        setGlobalLoading('טוען פלייליסט...');
         try {
             const data = await fetchYouTubeBrowseApi(
                 YOUTUBE_API_BASE,
@@ -520,6 +519,7 @@ const App: React.FC = () => {
                     name: result.title,
                     creator: result.author || '',
                     isPublic: false,
+                    externalType: (result.type || 'playlist') as Playlist['externalType'],
                     songs: tracks
                 });
                 setActiveTab('playlist');
@@ -533,7 +533,6 @@ const App: React.FC = () => {
                 isAlertOnly: true
             });
         } finally {
-            setIsSearching(false);
             setGlobalLoading(null);
         }
     };
@@ -651,6 +650,7 @@ const App: React.FC = () => {
             />
             <BulkImportModal
                 state={bulkImportState}
+                isEncryptionEnabled={isEncryptionEnabled}
                 inputValue={inputModalValue}
                 onInputChange={setInputModalValue}
                 onSetState={setBulkImportState}
@@ -908,6 +908,7 @@ const App: React.FC = () => {
                             onRefresh={() => loadStreamifyRecommendations(true, streamifyCategory)}
                             onResultClick={handleResultClick}
                             onDirectPlay={handleDirectPlay}
+                            onAddToPlaylistClick={handleAddToPlaylistClick}
                         />
                     )}
 
@@ -942,8 +943,24 @@ const App: React.FC = () => {
                             onToggleShuffle={toggleShuffle}
                             onPlaylistPlay={handlePlaylistPlay}
                             onAddAllTempSongs={(songs) => {
-                                setSongsToAdd(songs);
-                                setShowPlaylistSelector(true);
+                                const rawId = selectedPlaylist.id.replace(/^temp-/, '');
+                                if (rawId && rawId !== 'search' && rawId !== 'queue') {
+                                    setBulkImportState({
+                                        isOpen: true,
+                                        item: {
+                                            id: rawId,
+                                            title: selectedPlaylist.name,
+                                            author: selectedPlaylist.creator,
+                                            type: selectedPlaylist.externalType || 'playlist',
+                                            thumbnail_url: songs[0]?.thumbnail || ''
+                                        },
+                                        tracks: songs,
+                                        mode: 'select_action'
+                                    });
+                                } else {
+                                    setSongsToAdd(songs);
+                                    setShowPlaylistSelector(true);
+                                }
                             }}
                             onPlaySong={handlePlaySong}
                             onRemoveSongConfirm={(song) => {

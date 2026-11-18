@@ -110,6 +110,8 @@ const Player: React.FC<PlayerProps> = ({
     const [songDetails, setSongDetails] = useState<SongDetailedInfo | null>(null);
     const [isLoadingDetails, setIsLoadingDetails] = useState(false);
     const [showFullDescription, setShowFullDescription] = useState(false);
+    const [isDescriptionTruncated, setIsDescriptionTruncated] = useState(false);
+    const descriptionRef = useRef<HTMLParagraphElement | null>(null);
 
     // סנכרון הזמן הראשוני שנשמר (למשל בעלייה מחדש במולטימדיה לרכב)
     useEffect(() => {
@@ -123,11 +125,35 @@ const Player: React.FC<PlayerProps> = ({
             lastSongIdRef.current = currentSong?.id || null;
             setSongDetails(null);
             setShowFullDescription(false);
+            setIsDescriptionTruncated(false);
             if (currentSong?.duration) {
                 setDuration(currentSong.duration);
             }
         }
     }, [currentSong?.id, currentSong?.duration]);
+
+    // בדיקה אמיתית האם התיאור נחתך בפועל (מתחשב גם בשורות קצרות מרובות בעברית וגם בטקסט ארוך)
+    useEffect(() => {
+        if (showFullDescription) return;
+        const el = descriptionRef.current;
+        const desc = songDetails?.description || '';
+        if (!desc) {
+            setIsDescriptionTruncated(false);
+            return;
+        }
+        const checkOverflow = () => {
+            if (el && el.scrollHeight > el.clientHeight + 2) {
+                setIsDescriptionTruncated(true);
+            } else if (desc.length > 160 || desc.split(/\r?\n/).length > 4) {
+                setIsDescriptionTruncated(true);
+            } else {
+                setIsDescriptionTruncated(false);
+            }
+        };
+        checkOverflow();
+        const raf = requestAnimationFrame(checkOverflow);
+        return () => cancelAnimationFrame(raf);
+    }, [songDetails?.description, showFullDescription, isExpanded]);
 
     // טעינה מהירה של מידע מפורט מיוטיוב מיוזיק רק כשמסך השיר המלא פתוח (עם Cache בזיכרון)
     useEffect(() => {
@@ -575,7 +601,7 @@ const Player: React.FC<PlayerProps> = ({
                                     <h4 className="text-sm font-bold text-gray-200">
                                         תיאור ופרטים נוספים
                                     </h4>
-                                    {songDetails.description.length > 220 && (
+                                    {(isDescriptionTruncated || showFullDescription) && (
                                         <button
                                             onClick={() => setShowFullDescription((v) => !v)}
                                             className="text-xs font-bold text-spotify-primary hover:underline"
@@ -585,6 +611,8 @@ const Player: React.FC<PlayerProps> = ({
                                     )}
                                 </div>
                                 <p
+                                    ref={descriptionRef}
+                                    dir="auto"
                                     className={`text-xs md:text-sm text-gray-300 whitespace-pre-line leading-relaxed ${
                                         showFullDescription ? '' : 'line-clamp-5'
                                     }`}

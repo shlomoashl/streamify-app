@@ -346,10 +346,6 @@ export const useSearchManager = (params: {
             itemAsResult.type &&
             ['album', 'playlist', 'podcast', 'artist'].includes(itemAsResult.type)
         ) {
-            const setLoading = isPlaylistSearching
-                ? setIsPlaylistSearching
-                : setIsSearching;
-            setLoading(true);
             setGlobalLoading('טוען שירים...');
             try {
                 const data = await fetchYouTubeBrowseApi(
@@ -389,7 +385,6 @@ export const useSearchManager = (params: {
                     isAlertOnly: true
                 });
             } finally {
-                setLoading(false);
                 setGlobalLoading(null);
             }
             return;

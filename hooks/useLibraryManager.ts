@@ -392,7 +392,6 @@ export const useLibraryManager = (params: {
         async (playlist: Playlist) => {
             if (!playlist.externalId || !playlist.externalType) return;
 
-            setIsSearching(true);
             setGlobalLoading('טוען תוכן מהרשת...');
 
             try {
@@ -429,11 +428,10 @@ export const useLibraryManager = (params: {
                     isAlertOnly: true
                 });
             } finally {
-                setIsSearching(false);
                 setGlobalLoading(null);
             }
         },
-        [isEncryptionEnabled, setConfirmModal, setGlobalLoading, setIsSearching]
+        [isEncryptionEnabled, setConfirmModal, setGlobalLoading]
     );
 
     useEffect(() => {

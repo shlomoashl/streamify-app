@@ -191,6 +191,7 @@ export const SearchView: React.FC<{
                                         <button
                                             onClick={(e) => onDirectPlay(e, res)}
                                             className="absolute bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-[0_4px_12px_rgba(0,0,0,0.6)] hover:scale-110 active:scale-95 transition-transform z-20 w-8 h-8 md:w-10 md:h-10 bottom-2 left-2 opacity-100"
+                                            title="נגן"
                                         >
                                             {isItemPlaying ? (
                                                 <PauseIcon className="w-4 h-4 md:w-5 md:h-5" fill />
@@ -202,6 +203,17 @@ export const SearchView: React.FC<{
                                             )}
                                         </button>
                                     )}
+
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onAddToPlaylistClick(e, res);
+                                        }}
+                                        className="absolute top-2 right-2 bg-black/70 hover:bg-black text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-transform z-20 w-8 h-8 border border-white/15"
+                                        title="שמור לספרייה (קישור ישיר / ייבוא לפלייליסט)"
+                                    >
+                                        <PlusIcon className="w-4 h-4" />
+                                    </button>
                                 </div>
 
                                 <div
@@ -511,6 +523,17 @@ export const SearchView: React.FC<{
                                                             </span>
                                                         )}
                                                     </div>
+
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            onAddToPlaylistClick(e, topResult);
+                                                        }}
+                                                        className="absolute top-5 left-5 w-10 h-10 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-all border border-white/15 z-20"
+                                                        title="שמור לספרייה / הוסף לפלייליסט"
+                                                    >
+                                                        <PlusIcon className="w-5 h-5" />
+                                                    </button>
 
                                                     <div className="absolute bottom-6 left-6 scale-110 z-20">
                                                         <button

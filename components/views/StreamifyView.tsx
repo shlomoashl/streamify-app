@@ -6,6 +6,7 @@ import {
     PauseIcon,
     PlayIcon,
     PlaylistIcon,
+    PlusIcon,
     RefreshCcwIcon
 } from '../Icons';
 import { SmartImage } from '../SmartImage';
@@ -44,6 +45,7 @@ export const StreamifyView: React.FC<{
     onRefresh: () => void;
     onResultClick: (res: YouTubeSearchResult) => void;
     onDirectPlay: (e: React.MouseEvent, res: YouTubeSearchResult) => void;
+    onAddToPlaylistClick: (e: React.MouseEvent, res: YouTubeSearchResult) => void;
 }> = ({
     isEncryptionEnabled,
     activeCategory,
@@ -56,7 +58,8 @@ export const StreamifyView: React.FC<{
     onSelectCategory,
     onRefresh,
     onResultClick,
-    onDirectPlay
+    onDirectPlay,
+    onAddToPlaylistClick
 }) => {
     const activeLabel =
         STREAMIFY_CATEGORIES.find((c) => c.id === activeCategory)?.label || 'מומלצים עבורך';
@@ -141,6 +144,7 @@ export const StreamifyView: React.FC<{
                                         <button
                                             onClick={(e) => onDirectPlay(e, res)}
                                             className="absolute bg-spotify-primary rounded-full flex items-center justify-center text-black shadow-[0_4px_12px_rgba(0,0,0,0.6)] hover:scale-110 active:scale-95 transition-transform z-20 w-8 h-8 md:w-10 md:h-10 bottom-2 left-2 opacity-100"
+                                            title="נגן"
                                         >
                                             {isItemPlaying ? (
                                                 <PauseIcon className="w-4 h-4 md:w-5 md:h-5" fill />
@@ -150,6 +154,17 @@ export const StreamifyView: React.FC<{
                                                     fill
                                                 />
                                             )}
+                                        </button>
+
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onAddToPlaylistClick(e, res);
+                                            }}
+                                            className="absolute top-2 right-2 bg-black/70 hover:bg-black text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-transform z-20 w-8 h-8 border border-white/15"
+                                            title="שמור לספרייה (קישור ישיר / ייבוא לפלייליסט)"
+                                        >
+                                            <PlusIcon className="w-4 h-4" />
                                         </button>
                                     </div>
 

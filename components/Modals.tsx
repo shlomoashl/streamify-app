@@ -14,6 +14,7 @@ import {
     UsersIcon,
     XIcon
 } from './Icons';
+import { SmartImage } from './SmartImage';
 
 export interface ConfirmModalState {
     isOpen: boolean;
@@ -74,11 +75,19 @@ export const GlobalLoader: React.FC<{
     }
 
     return (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[150] flex items-center gap-3 px-5 py-2.5 bg-[#282828] border border-white/10 rounded-full shadow-[0_10px_40px_rgba(0,0,0,0.8)] animate-fade-in pointer-events-none">
-            <LoaderIcon className="w-4 h-4 text-spotify-primary animate-spin" />
-            <span className="text-white text-sm font-medium truncate max-w-[200px]" dir="rtl">
-                {globalLoading}
-            </span>
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/55 backdrop-blur-sm animate-fade-in px-4">
+            <div className="flex flex-col items-center gap-4 px-8 py-6 bg-[#181818]/95 border border-white/15 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.85)] min-w-[200px]">
+                <div className="relative flex items-center justify-center w-14 h-14">
+                    <div className="absolute inset-0 rounded-full border-4 border-spotify-primary/20"></div>
+                    <LoaderIcon className="w-14 h-14 text-spotify-primary animate-spin" />
+                </div>
+                <span
+                    className="text-white text-base font-bold tracking-wide text-center max-w-[260px]"
+                    dir="rtl"
+                >
+                    {globalLoading}
+                </span>
+            </div>
         </div>
     );
 };
@@ -241,6 +250,7 @@ export const ManageUsersModal: React.FC<{
 
 export const BulkImportModal: React.FC<{
     state: BulkImportModalState;
+    isEncryptionEnabled: boolean;
     inputValue: string;
     onInputChange: (val: string) => void;
     onSetState: React.Dispatch<React.SetStateAction<BulkImportModalState>>;
@@ -255,6 +265,7 @@ export const BulkImportModal: React.FC<{
     onOpenPlaylistSelector: (songs: PlaylistItem[]) => void;
 }> = ({
     state,
+    isEncryptionEnabled,
     inputValue,
     onInputChange,
     onSetState,
@@ -277,15 +288,13 @@ export const BulkImportModal: React.FC<{
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="mb-6">
-                    <div className="w-24 h-24 mx-auto bg-neutral-800 rounded-lg mb-4 flex items-center justify-center">
-                        {item.thumbnail || item.thumbnail_url ? (
-                            <img
-                                src={item.thumbnail || item.thumbnail_url}
-                                className="w-full h-full object-cover rounded-lg"
-                            />
-                        ) : (
-                            <AlbumIcon className="w-10 h-10 text-gray-500" />
-                        )}
+                    <div className="w-24 h-24 mx-auto bg-neutral-800 rounded-lg mb-4 flex items-center justify-center overflow-hidden">
+                        <SmartImage
+                            src={item.thumbnail || item.thumbnail_url || ''}
+                            encryptionEnabled={isEncryptionEnabled}
+                            className="w-full h-full object-cover rounded-lg"
+                            fallback={<AlbumIcon className="w-10 h-10 text-gray-500" />}
+                        />
                     </div>
                     <h3 className="text-lg font-bold text-white truncate px-4">{item.title}</h3>
                     <p className="text-gray-400 text-sm mt-1">{state.tracks.length} שירים ייובאו</p>
