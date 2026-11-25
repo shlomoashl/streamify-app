@@ -1,18 +1,23 @@
 package com.streamify.app;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.media.AudioManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.telephony.TelephonyManager;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -86,6 +91,31 @@ public class PlaybackService extends MediaSessionService {
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
 
+    // ניטור שיחות נכנסות/פעילות (סלולר, Bluetooth SCO, VoIP/WhatsApp) לעצירה והמשך אוטומטי
+    private AudioManager audioManager;
+    private Object audioModeChangedListener;
+    private BroadcastReceiver callStateReceiver;
+    private volatile boolean telephonyCallActive = false;
+    private volatile boolean scoCallActive = false;
+    private volatile boolean audioModeCallActive = false;
+    private volatile boolean pausedByCall = false;
+    private volatile boolean isPausingForCall = false;
+
+    private final Runnable resumeAfterCallRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (audioManager != null) {
+                audioModeCallActive = isCallAudioMode(audioManager.getMode());
+            }
+            if (!isAnyCallActive() && pausedByCall && !userPaused && player != null) {
+                pausedByCall = false;
+                Log.i(TAG, "📞 Call ended -> Resuming playback from " + player.getCurrentPosition() + "ms");
+                player.setPlayWhenReady(true);
+                player.play();
+            }
+        }
+    };
+
     // דגלי בקרה קריטיים (Single Source of Truth)
     private volatile boolean isRestoringState = false;
     private volatile boolean userPaused = true;
@@ -107,6 +137,7 @@ public class PlaybackService extends MediaSessionService {
         @Override
         public void run() {
             try {
+                checkCallAudioMode();
                 if (player != null && !isRestoringState && player.isPlaying()
                         && player.getPlaybackState() == Player.STATE_READY) {
                     long currentPos = player.getCurrentPosition();
@@ -164,6 +195,8 @@ public class PlaybackService extends MediaSessionService {
 
     public void setUserPaused(boolean paused) {
         this.userPaused = paused;
+        this.pausedByCall = false;
+        mainHandler.removeCallbacks(resumeAfterCallRunnable);
         if (paused) {
             this.waitingForNetwork = false;
             retryHandler.removeCallbacksAndMessages(null);
@@ -189,6 +222,7 @@ public class PlaybackService extends MediaSessionService {
 
         initLocks();
         initNetworkMonitor();
+        initCallStateMonitor();
 
         String userAgent = "Streamify";
         DefaultHttpDataSource.Factory httpDataSourceFactory = new DefaultHttpDataSource.Factory()
@@ -232,8 +266,8 @@ public class PlaybackService extends MediaSessionService {
         ForwardingPlayer guardedSessionPlayer = new ForwardingPlayer(player) {
             @Override
             public void play() {
-                if (userPaused) {
-                    Log.w(TAG, "Blocked external MediaSession play() because userPaused=true");
+                if (userPaused || (pausedByCall && isAnyCallActive())) {
+                    Log.w(TAG, "Blocked external MediaSession play() (userPaused=" + userPaused + ", pausedByCall=" + pausedByCall + ")");
                     super.setPlayWhenReady(false);
                     super.pause();
                     PluginEvents.postEvent("playbackState", false);
@@ -244,8 +278,8 @@ public class PlaybackService extends MediaSessionService {
 
             @Override
             public void setPlayWhenReady(boolean playWhenReady) {
-                if (playWhenReady && userPaused) {
-                    Log.w(TAG, "Blocked external MediaSession setPlayWhenReady(true) because userPaused=true");
+                if (playWhenReady && (userPaused || (pausedByCall && isAnyCallActive()))) {
+                    Log.w(TAG, "Blocked external MediaSession setPlayWhenReady(true) (userPaused=" + userPaused + ", pausedByCall=" + pausedByCall + ")");
                     super.setPlayWhenReady(false);
                     super.pause();
                     PluginEvents.postEvent("playbackState", false);
@@ -586,6 +620,127 @@ public class PlaybackService extends MediaSessionService {
         }
     }
 
+    private boolean isCallAudioMode(int mode) {
+        if (mode == AudioManager.MODE_RINGTONE
+                || mode == AudioManager.MODE_IN_CALL
+                || mode == AudioManager.MODE_IN_COMMUNICATION) {
+            return true;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && mode == AudioManager.MODE_CALL_SCREENING) {
+            return true;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && (mode == AudioManager.MODE_CALL_REDIRECT || mode == AudioManager.MODE_COMMUNICATION_REDIRECT)) {
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isAnyCallActive() {
+        return telephonyCallActive || scoCallActive || audioModeCallActive;
+    }
+
+    private void checkCallAudioMode() {
+        if (audioManager == null) return;
+        try {
+            boolean modeInCall = isCallAudioMode(audioManager.getMode());
+            if (modeInCall != audioModeCallActive) {
+                audioModeCallActive = modeInCall;
+                updateCallState("AUDIO_MODE_POLL:" + audioManager.getMode());
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void updateCallState(String source) {
+        mainHandler.post(() -> {
+            boolean callNow = isAnyCallActive();
+            if (callNow) {
+                mainHandler.removeCallbacks(resumeAfterCallRunnable);
+                if (player != null && !userPaused && !pausedByCall
+                        && (player.isPlaying() || player.getPlayWhenReady())) {
+                    pausedByCall = true;
+                    long posMs = player.getCurrentPosition();
+                    saveCurrentPositionSafely(false);
+                    isPausingForCall = true;
+                    try {
+                        player.setPlayWhenReady(false);
+                        player.pause();
+                    } finally {
+                        isPausingForCall = false;
+                    }
+                    PluginEvents.postEvent("playbackState", false);
+                    Log.i(TAG, "📞 Call active (" + source + ") -> Paused playback at " + posMs + "ms");
+                }
+            } else if (pausedByCall && !userPaused) {
+                mainHandler.removeCallbacks(resumeAfterCallRunnable);
+                Log.i(TAG, "📞 Call ended (" + source + ") -> Scheduling auto-resume in 800ms");
+                mainHandler.postDelayed(resumeAfterCallRunnable, 800);
+            }
+        });
+    }
+
+    private void initCallStateMonitor() {
+        try {
+            audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (audioManager != null) {
+                audioModeCallActive = isCallAudioMode(audioManager.getMode());
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    AudioManager.OnModeChangedListener listener = mode -> {
+                        boolean modeInCall = isCallAudioMode(mode);
+                        if (modeInCall != audioModeCallActive) {
+                            audioModeCallActive = modeInCall;
+                            updateCallState("AUDIO_MODE:" + mode);
+                        }
+                    };
+                    audioModeChangedListener = listener;
+                    audioManager.addOnModeChangedListener(getMainExecutor(), listener);
+                }
+            }
+
+            callStateReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if (intent == null || intent.getAction() == null) return;
+                    String action = intent.getAction();
+                    if (TelephonyManager.ACTION_PHONE_STATE_CHANGED.equals(action)) {
+                        String state = intent.getStringExtra(TelephonyManager.EXTRA_STATE);
+                        if (TelephonyManager.EXTRA_STATE_RINGING.equals(state)
+                                || TelephonyManager.EXTRA_STATE_OFFHOOK.equals(state)) {
+                            telephonyCallActive = true;
+                            updateCallState("PHONE_STATE:" + state);
+                        } else if (TelephonyManager.EXTRA_STATE_IDLE.equals(state)) {
+                            telephonyCallActive = false;
+                            updateCallState("PHONE_STATE:IDLE");
+                        }
+                    } else if (AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED.equals(action)) {
+                        int scoState = intent.getIntExtra(
+                                AudioManager.EXTRA_SCO_AUDIO_STATE,
+                                AudioManager.SCO_AUDIO_STATE_DISCONNECTED
+                        );
+                        if (scoState == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
+                            scoCallActive = true;
+                            updateCallState("SCO_CONNECTED");
+                        } else if (scoState == AudioManager.SCO_AUDIO_STATE_DISCONNECTED) {
+                            scoCallActive = false;
+                            updateCallState("SCO_DISCONNECTED");
+                        }
+                    }
+                }
+            };
+
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(TelephonyManager.ACTION_PHONE_STATE_CHANGED);
+            filter.addAction(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(callStateReceiver, filter, Context.RECEIVER_EXPORTED);
+            } else {
+                registerReceiver(callStateReceiver, filter);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to initialize call state monitor", e);
+        }
+    }
+
     private void resumeCurrentTrackFromSavedPosition() {
         if (player == null || userPaused || player.getMediaItemCount() == 0) return;
         JSONObject cp = readBestSavedCheckpoint(this);
@@ -615,17 +770,22 @@ public class PlaybackService extends MediaSessionService {
 
             @Override
             public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
-                // חוק ברזל: אם הלקוח במצב Pause, שום אירוע חיצוני (כמו פתיחת Google/הגדרות או AudioFocus)
+                // חוק ברזל: אם הלקוח במצב Pause או בשיחה פעילה, שום אירוע חיצוני (כמו פתיחת Google/הגדרות או AudioFocus)
                 // לא יכול להדליק את הנגן מעצמו!
-                if (playWhenReady && userPaused) {
-                    Log.w(TAG, "Blocking unexpected playWhenReady=true (reason=" + reason + ") because userPaused=true");
-                    player.setPlayWhenReady(false);
-                    player.pause();
+                if (playWhenReady && (userPaused || (pausedByCall && isAnyCallActive()))) {
+                    Log.w(TAG, "Blocking unexpected playWhenReady=true (reason=" + reason + ", userPaused=" + userPaused + ", pausedByCall=" + pausedByCall + ")");
+                    isPausingForCall = pausedByCall && !userPaused;
+                    try {
+                        player.setPlayWhenReady(false);
+                        player.pause();
+                    } finally {
+                        isPausingForCall = false;
+                    }
                     PluginEvents.postEvent("playbackState", false);
                     return;
                 }
 
-                if (!playWhenReady && (
+                if (!playWhenReady && !isPausingForCall && (
                         reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST ||
                         reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY)) {
                     setUserPaused(true);
@@ -1008,9 +1168,24 @@ public class PlaybackService extends MediaSessionService {
     @Override
     public void onDestroy() {
         mainHandler.removeCallbacks(saveRunnable);
+        mainHandler.removeCallbacks(resumeAfterCallRunnable);
         retryHandler.removeCallbacksAndMessages(null);
         saveCurrentPositionSafely(true);
         diskExecutor.shutdown();
+
+        if (callStateReceiver != null) {
+            try {
+                unregisterReceiver(callStateReceiver);
+            } catch (Exception ignored) {}
+            callStateReceiver = null;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && audioManager != null && audioModeChangedListener != null) {
+            try {
+                audioManager.removeOnModeChangedListener((AudioManager.OnModeChangedListener) audioModeChangedListener);
+            } catch (Exception ignored) {}
+            audioModeChangedListener = null;
+        }
 
         if (connectivityManager != null && networkCallback != null) {
             try {
