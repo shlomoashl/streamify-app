@@ -1,11 +1,15 @@
 package com.streamify.app;
 
+import android.bluetooth.BluetoothHeadset;
+import android.bluetooth.BluetoothProfile;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
+import android.media.AudioPlaybackConfiguration;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -49,6 +53,7 @@ import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.lang.reflect.Method;
 import java.net.ConnectException;
 import java.net.HttpURLConnection;
 import java.net.NoRouteToHostException;
@@ -91,15 +96,35 @@ public class PlaybackService extends MediaSessionService {
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
 
-    // ניטור שיחות נכנסות/פעילות (סלולר, Bluetooth SCO, VoIP/WhatsApp) לעצירה והמשך אוטומטי
+    // ניטור שיחות נכנסות/פעילות (סלולר, Bluetooth HFP/SCO/HeadsetClient, VoIP/WhatsApp) + AudioFocus + ניגון מאפליקציה אחרת
+    private static final String ACTION_HFP_CLIENT_AUDIO_STATE_CHANGED =
+            "android.bluetooth.headsetclient.profile.action.AUDIO_STATE_CHANGED";
+    private static final String ACTION_HFP_CLIENT_AG_CALL_CHANGED =
+            "android.bluetooth.headsetclient.profile.action.AG_CALL_CHANGED";
+    private static final String EXTRA_HFP_CLIENT_CALL =
+            "android.bluetooth.headsetclient.extra.CALL";
+
     private AudioManager audioManager;
     private Object audioModeChangedListener;
+    private Object audioPlaybackCallback;
+    private Object audioFocusRequestObj;
     private BroadcastReceiver callStateReceiver;
+
     private volatile boolean telephonyCallActive = false;
     private volatile boolean scoCallActive = false;
+    private volatile boolean btHeadsetCallActive = false;
+    private volatile boolean btClientCallActive = false;
     private volatile boolean audioModeCallActive = false;
+    private volatile boolean playbackConfigCallActive = false;
+
     private volatile boolean pausedByCall = false;
+    private volatile boolean pausedByAudioFocus = false;
+    private volatile boolean hasAudioFocus = false;
     private volatile boolean isPausingForCall = false;
+
+    private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = focusChange -> {
+        mainHandler.post(() -> handleAudioFocusChange(focusChange));
+    };
 
     private final Runnable resumeAfterCallRunnable = new Runnable() {
         @Override
@@ -107,11 +132,33 @@ public class PlaybackService extends MediaSessionService {
             if (audioManager != null) {
                 audioModeCallActive = isCallAudioMode(audioManager.getMode());
             }
-            if (!isAnyCallActive() && pausedByCall && !userPaused && player != null) {
+            if (!isAnyCallActive() && (pausedByCall || pausedByAudioFocus) && !userPaused && player != null) {
                 pausedByCall = false;
-                Log.i(TAG, "📞 Call ended -> Resuming playback from " + player.getCurrentPosition() + "ms");
+                pausedByAudioFocus = false;
+                Log.i(TAG, "📞 Call/Focus interruption ended -> Resuming playback from " + player.getCurrentPosition() + "ms");
+                requestAudioFocusIfNeeded();
+                player.setVolume(1.0f);
                 player.setPlayWhenReady(true);
                 player.play();
+            }
+        }
+    };
+
+    private final Runnable otherMediaConflictRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || audioManager == null || player == null) return;
+            if (userPaused || isAnyCallActive() || !player.isPlaying()) return;
+            try {
+                List<AudioPlaybackConfiguration> configs = audioManager.getActivePlaybackConfigurations();
+                int activeMediaCount = countActiveMediaPlaybacks(configs);
+                if (activeMediaCount >= 2) {
+                    Log.i(TAG, "🎬 Another media app is playing simultaneously (activeMediaCount=" + activeMediaCount + ") -> Yielding playback");
+                    setUserPaused(true);
+                    PluginEvents.postEvent("playbackState", false);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Failed checking active playback configurations", e);
             }
         }
     };
@@ -196,10 +243,13 @@ public class PlaybackService extends MediaSessionService {
     public void setUserPaused(boolean paused) {
         this.userPaused = paused;
         this.pausedByCall = false;
+        this.pausedByAudioFocus = false;
         mainHandler.removeCallbacks(resumeAfterCallRunnable);
+        mainHandler.removeCallbacks(otherMediaConflictRunnable);
         if (paused) {
             this.waitingForNetwork = false;
             retryHandler.removeCallbacksAndMessages(null);
+            abandonAudioFocus();
             if (player != null) {
                 player.setPlayWhenReady(false);
                 player.pause();
@@ -208,6 +258,7 @@ public class PlaybackService extends MediaSessionService {
         } else {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             prefs.edit().putBoolean("user_paused", false).commit();
+            requestAudioFocusIfNeeded();
         }
     }
 
@@ -257,7 +308,8 @@ public class PlaybackService extends MediaSessionService {
                 .setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                 .build();
-        player.setAudioAttributes(audioAttributes, true);
+        // ניהול AudioFocus מתבצע ישירות דרך AudioManager + AudioPlaybackCallback לשליטה מלאה בשיחות ואפליקציות רקע
+        player.setAudioAttributes(audioAttributes, false);
 
         setupPlayerListeners();
 
@@ -266,24 +318,28 @@ public class PlaybackService extends MediaSessionService {
         ForwardingPlayer guardedSessionPlayer = new ForwardingPlayer(player) {
             @Override
             public void play() {
-                if (userPaused || (pausedByCall && isAnyCallActive())) {
-                    Log.w(TAG, "Blocked external MediaSession play() (userPaused=" + userPaused + ", pausedByCall=" + pausedByCall + ")");
+                if (userPaused || (pausedByCall && isAnyCallActive()) || pausedByAudioFocus) {
+                    Log.w(TAG, "Blocked external MediaSession play() (userPaused=" + userPaused + ", pausedByCall=" + pausedByCall + ", pausedByAudioFocus=" + pausedByAudioFocus + ")");
                     super.setPlayWhenReady(false);
                     super.pause();
                     PluginEvents.postEvent("playbackState", false);
                     return;
                 }
+                requestAudioFocusIfNeeded();
                 super.play();
             }
 
             @Override
             public void setPlayWhenReady(boolean playWhenReady) {
-                if (playWhenReady && (userPaused || (pausedByCall && isAnyCallActive()))) {
-                    Log.w(TAG, "Blocked external MediaSession setPlayWhenReady(true) (userPaused=" + userPaused + ", pausedByCall=" + pausedByCall + ")");
+                if (playWhenReady && (userPaused || (pausedByCall && isAnyCallActive()) || pausedByAudioFocus)) {
+                    Log.w(TAG, "Blocked external MediaSession setPlayWhenReady(true) (userPaused=" + userPaused + ", pausedByCall=" + pausedByCall + ", pausedByAudioFocus=" + pausedByAudioFocus + ")");
                     super.setPlayWhenReady(false);
                     super.pause();
                     PluginEvents.postEvent("playbackState", false);
                     return;
+                }
+                if (playWhenReady) {
+                    requestAudioFocusIfNeeded();
                 }
                 super.setPlayWhenReady(playWhenReady);
             }
@@ -637,7 +693,174 @@ public class PlaybackService extends MediaSessionService {
     }
 
     private boolean isAnyCallActive() {
-        return telephonyCallActive || scoCallActive || audioModeCallActive;
+        return telephonyCallActive
+                || scoCallActive
+                || btHeadsetCallActive
+                || btClientCallActive
+                || audioModeCallActive
+                || playbackConfigCallActive;
+    }
+
+    private void requestAudioFocusIfNeeded() {
+        if (audioManager == null) {
+            audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        }
+        if (audioManager == null || hasAudioFocus) return;
+        try {
+            int result;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                android.media.AudioAttributes sysAttrs = new android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build();
+                AudioFocusRequest req = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                        .setAudioAttributes(sysAttrs)
+                        .setAcceptsDelayedFocusGain(true)
+                        .setWillPauseWhenDucked(false)
+                        .setOnAudioFocusChangeListener(audioFocusChangeListener, mainHandler)
+                        .build();
+                audioFocusRequestObj = req;
+                result = audioManager.requestAudioFocus(req);
+            } else {
+                result = audioManager.requestAudioFocus(
+                        audioFocusChangeListener,
+                        AudioManager.STREAM_MUSIC,
+                        AudioManager.AUDIOFOCUS_GAIN
+                );
+            }
+            hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+            if (hasAudioFocus && player != null) {
+                player.setVolume(1.0f);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed requesting audio focus", e);
+        }
+    }
+
+    private void abandonAudioFocus() {
+        if (audioManager == null) return;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (audioFocusRequestObj != null) {
+                    audioManager.abandonAudioFocusRequest((AudioFocusRequest) audioFocusRequestObj);
+                }
+            } else {
+                audioManager.abandonAudioFocus(audioFocusChangeListener);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed abandoning audio focus", e);
+        } finally {
+            hasAudioFocus = false;
+        }
+    }
+
+    private void handleAudioFocusChange(int focusChange) {
+        if (player == null) return;
+        switch (focusChange) {
+            case AudioManager.AUDIOFOCUS_LOSS:
+                // אפליקציה אחרת (כרום/יוטיוב/וידאו וכו') לקחה את השמע — עוצרים ומשחררים לה את ההשמעה
+                Log.i(TAG, "🔇 AUDIOFOCUS_LOSS -> Yielding playback to another app");
+                hasAudioFocus = false;
+                pausedByAudioFocus = false;
+                if (!userPaused) {
+                    setUserPaused(true);
+                    PluginEvents.postEvent("playbackState", false);
+                }
+                break;
+
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                // הפרעה זמנית (שיחת טלפון/בלוטות'/הודעה קולית) — עוצרים ונמשיך אוטומטית כשהפוקוס יחזור
+                Log.i(TAG, "📞 AUDIOFOCUS_LOSS_TRANSIENT -> Pausing playback temporarily");
+                hasAudioFocus = false;
+                mainHandler.removeCallbacks(resumeAfterCallRunnable);
+                if (!userPaused && (player.isPlaying() || player.getPlayWhenReady())) {
+                    pausedByAudioFocus = true;
+                    saveCurrentPositionSafely(false);
+                    isPausingForCall = true;
+                    try {
+                        player.setPlayWhenReady(false);
+                        player.pause();
+                    } finally {
+                        isPausingForCall = false;
+                    }
+                    PluginEvents.postEvent("playbackState", false);
+                }
+                break;
+
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                // אם יש שיחה פעילה — עוצרים; אחרת (כמו Waze) מנמיכים זמנית
+                if (isAnyCallActive()) {
+                    handleAudioFocusChange(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT);
+                } else {
+                    Log.d(TAG, "🔉 AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> Ducking volume");
+                    player.setVolume(0.25f);
+                }
+                break;
+
+            case AudioManager.AUDIOFOCUS_GAIN:
+                hasAudioFocus = true;
+                player.setVolume(1.0f);
+                if ((pausedByAudioFocus || pausedByCall) && !userPaused && !isAnyCallActive()) {
+                    Log.i(TAG, "🔊 AUDIOFOCUS_GAIN -> Scheduling resume");
+                    mainHandler.removeCallbacks(resumeAfterCallRunnable);
+                    mainHandler.postDelayed(resumeAfterCallRunnable, 500);
+                }
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    private int countActiveMediaPlaybacks(List<AudioPlaybackConfiguration> configs) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || configs == null) return 0;
+        int mediaCount = 0;
+        for (AudioPlaybackConfiguration cfg : configs) {
+            if (cfg == null) continue;
+            android.media.AudioAttributes attrs = cfg.getAudioAttributes();
+            if (attrs == null) continue;
+            int usage = attrs.getUsage();
+            if (usage == android.media.AudioAttributes.USAGE_MEDIA
+                    || usage == android.media.AudioAttributes.USAGE_GAME) {
+                mediaCount++;
+            }
+        }
+        return mediaCount;
+    }
+
+    private boolean hasActiveCallPlaybackConfig(List<AudioPlaybackConfiguration> configs) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || configs == null) return false;
+        for (AudioPlaybackConfiguration cfg : configs) {
+            if (cfg == null) continue;
+            android.media.AudioAttributes attrs = cfg.getAudioAttributes();
+            if (attrs == null) continue;
+            int usage = attrs.getUsage();
+            if (usage == android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION
+                    || usage == android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING
+                    || usage == android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void handleActivePlaybackConfigs(List<AudioPlaybackConfiguration> configs) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || configs == null) return;
+        boolean callConfigNow = hasActiveCallPlaybackConfig(configs);
+        if (callConfigNow != playbackConfigCallActive) {
+            playbackConfigCallActive = callConfigNow;
+            updateCallState("PLAYBACK_CONFIG_CALL:" + callConfigNow);
+        }
+
+        if (!callConfigNow && !userPaused && !isAnyCallActive() && player != null && player.isPlaying()) {
+            int mediaCount = countActiveMediaPlaybacks(configs);
+            if (mediaCount >= 2) {
+                mainHandler.removeCallbacks(otherMediaConflictRunnable);
+                mainHandler.postDelayed(otherMediaConflictRunnable, 400);
+            } else {
+                mainHandler.removeCallbacks(otherMediaConflictRunnable);
+            }
+        }
     }
 
     private void checkCallAudioMode() {
@@ -647,6 +870,9 @@ public class PlaybackService extends MediaSessionService {
             if (modeInCall != audioModeCallActive) {
                 audioModeCallActive = modeInCall;
                 updateCallState("AUDIO_MODE_POLL:" + audioManager.getMode());
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                handleActivePlaybackConfigs(audioManager.getActivePlaybackConfigurations());
             }
         } catch (Exception ignored) {}
     }
@@ -695,6 +921,17 @@ public class PlaybackService extends MediaSessionService {
                     audioModeChangedListener = listener;
                     audioManager.addOnModeChangedListener(getMainExecutor(), listener);
                 }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    AudioManager.AudioPlaybackCallback cb = new AudioManager.AudioPlaybackCallback() {
+                        @Override
+                        public void onPlaybackConfigChanged(List<AudioPlaybackConfiguration> configs) {
+                            mainHandler.post(() -> handleActivePlaybackConfigs(configs));
+                        }
+                    };
+                    audioPlaybackCallback = cb;
+                    audioManager.registerAudioPlaybackCallback(cb, mainHandler);
+                }
             }
 
             callStateReceiver = new BroadcastReceiver() {
@@ -724,6 +961,45 @@ public class PlaybackService extends MediaSessionService {
                             scoCallActive = false;
                             updateCallState("SCO_DISCONNECTED");
                         }
+                    } else if (BluetoothHeadset.ACTION_AUDIO_STATE_CHANGED.equals(action)) {
+                        int btState = intent.getIntExtra(
+                                BluetoothProfile.EXTRA_STATE,
+                                BluetoothHeadset.STATE_AUDIO_DISCONNECTED
+                        );
+                        if (btState == BluetoothHeadset.STATE_AUDIO_CONNECTED
+                                || btState == BluetoothHeadset.STATE_AUDIO_CONNECTING) {
+                            btHeadsetCallActive = true;
+                            updateCallState("BT_HEADSET_AUDIO:" + btState);
+                        } else if (btState == BluetoothHeadset.STATE_AUDIO_DISCONNECTED) {
+                            btHeadsetCallActive = false;
+                            updateCallState("BT_HEADSET_AUDIO_DISCONNECTED");
+                        }
+                    } else if (ACTION_HFP_CLIENT_AUDIO_STATE_CHANGED.equals(action)) {
+                        int hfpState = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, 0);
+                        if (hfpState == 1 || hfpState == 2) {
+                            btClientCallActive = true;
+                            updateCallState("HFP_CLIENT_AUDIO:" + hfpState);
+                        } else if (hfpState == 0) {
+                            btClientCallActive = false;
+                            updateCallState("HFP_CLIENT_AUDIO_DISCONNECTED");
+                        }
+                    } else if (ACTION_HFP_CLIENT_AG_CALL_CHANGED.equals(action)) {
+                        try {
+                            Object callObj = intent.getParcelableExtra(EXTRA_HFP_CLIENT_CALL);
+                            if (callObj != null) {
+                                Method getStateMethod = callObj.getClass().getMethod("getState");
+                                Object stateVal = getStateMethod.invoke(callObj);
+                                if (stateVal instanceof Integer) {
+                                    int callState = (Integer) stateVal;
+                                    // 0=ACTIVE, 1=HELD, 2=DIALING, 3=ALERTING, 4=INCOMING, 5=WAITING, 7=TERMINATED
+                                    boolean active = (callState >= 0 && callState <= 5);
+                                    btClientCallActive = active;
+                                    updateCallState("HFP_CLIENT_CALL:" + callState);
+                                }
+                            }
+                        } catch (Exception e) {
+                            Log.w(TAG, "Failed parsing HFP Client call state", e);
+                        }
                     }
                 }
             };
@@ -731,6 +1007,9 @@ public class PlaybackService extends MediaSessionService {
             IntentFilter filter = new IntentFilter();
             filter.addAction(TelephonyManager.ACTION_PHONE_STATE_CHANGED);
             filter.addAction(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED);
+            filter.addAction(BluetoothHeadset.ACTION_AUDIO_STATE_CHANGED);
+            filter.addAction(ACTION_HFP_CLIENT_AUDIO_STATE_CHANGED);
+            filter.addAction(ACTION_HFP_CLIENT_AG_CALL_CHANGED);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 registerReceiver(callStateReceiver, filter, Context.RECEIVER_EXPORTED);
             } else {
@@ -772,9 +1051,9 @@ public class PlaybackService extends MediaSessionService {
             public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
                 // חוק ברזל: אם הלקוח במצב Pause או בשיחה פעילה, שום אירוע חיצוני (כמו פתיחת Google/הגדרות או AudioFocus)
                 // לא יכול להדליק את הנגן מעצמו!
-                if (playWhenReady && (userPaused || (pausedByCall && isAnyCallActive()))) {
-                    Log.w(TAG, "Blocking unexpected playWhenReady=true (reason=" + reason + ", userPaused=" + userPaused + ", pausedByCall=" + pausedByCall + ")");
-                    isPausingForCall = pausedByCall && !userPaused;
+                if (playWhenReady && (userPaused || (pausedByCall && isAnyCallActive()) || pausedByAudioFocus)) {
+                    Log.w(TAG, "Blocking unexpected playWhenReady=true (reason=" + reason + ", userPaused=" + userPaused + ", pausedByCall=" + pausedByCall + ", pausedByAudioFocus=" + pausedByAudioFocus + ")");
+                    isPausingForCall = (pausedByCall || pausedByAudioFocus) && !userPaused;
                     try {
                         player.setPlayWhenReady(false);
                         player.pause();
@@ -783,6 +1062,10 @@ public class PlaybackService extends MediaSessionService {
                     }
                     PluginEvents.postEvent("playbackState", false);
                     return;
+                }
+
+                if (playWhenReady && !userPaused && !isAnyCallActive()) {
+                    requestAudioFocusIfNeeded();
                 }
 
                 if (!playWhenReady && !isPausingForCall && (
@@ -1169,8 +1452,10 @@ public class PlaybackService extends MediaSessionService {
     public void onDestroy() {
         mainHandler.removeCallbacks(saveRunnable);
         mainHandler.removeCallbacks(resumeAfterCallRunnable);
+        mainHandler.removeCallbacks(otherMediaConflictRunnable);
         retryHandler.removeCallbacksAndMessages(null);
         saveCurrentPositionSafely(true);
+        abandonAudioFocus();
         diskExecutor.shutdown();
 
         if (callStateReceiver != null) {
@@ -1185,6 +1470,13 @@ public class PlaybackService extends MediaSessionService {
                 audioManager.removeOnModeChangedListener((AudioManager.OnModeChangedListener) audioModeChangedListener);
             } catch (Exception ignored) {}
             audioModeChangedListener = null;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && audioManager != null && audioPlaybackCallback != null) {
+            try {
+                audioManager.unregisterAudioPlaybackCallback((AudioManager.AudioPlaybackCallback) audioPlaybackCallback);
+            } catch (Exception ignored) {}
+            audioPlaybackCallback = null;
         }
 
         if (connectivityManager != null && networkCallback != null) {
