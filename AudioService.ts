@@ -338,6 +338,9 @@ class AudioService {
                     case 'remotePrev':
                         this.emit('remotePrev', {});
                         break;
+                    case 'nativeLog':
+                        console.info('[NativeAudio]', event.value);
+                        break;
                 }
             });
             this.nativeListeners.push(l1);
